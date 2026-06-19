@@ -10,7 +10,7 @@ Nhánh chính: `main` và `master` (hiện đang giống nhau, dùng nhánh nào
 Để chắc chắn code trên máy là bản mới nhất (tránh làm việc trên bản cũ rồi conflict):
 
 ```bash
-cd D:\0_DATN\DATN\phone-store
+cd D:\0_DATN\DATN
 git pull
 ```
 
@@ -71,7 +71,6 @@ git push
 ```bash
 git clone https://github.com/lehoangtrian/DATN.git
 cd DATN/phone-store
-npm install        # cài dependencies cho root (nếu có)
 cd client && npm install && cd ..
 cd server && npm install && cd ..
 ```
@@ -112,6 +111,7 @@ git stash pop        # lấy lại thay đổi đã cất
 | `.env` (server, client, bot) | Chứa secret (JWT_SECRET, Mongo URI...) — phải tự tạo lại theo các biến đang dùng trong code, không chia sẻ qua Git |
 | `*.gguf`, `*.bin`, `*.safetensors` | Model AI quá lớn (>100MB), GitHub chặn. Lưu riêng (Google Drive, Hugging Face Hub...) |
 | `server/logs/`, `server/uploads/*` (trừ `.gitkeep`) | File runtime, không phải source code |
+| `DB_Mongo/` | Bản dump database (chứa password hash, dữ liệu user/order) — không đẩy lên repo public để tránh rò rỉ dữ liệu, dù là dữ liệu test |
 
 Nếu lỡ `git add` một file `.env` hoặc file lớn: **đừng commit** — bỏ ra bằng `git restore --staged <file>` rồi thêm dòng loại trừ vào `.gitignore`.
 

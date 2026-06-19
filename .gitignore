@@ -1,4 +1,5 @@
 node_modules/
+/DB_Mongo/
 .env
 .env.local
 .env.production
