@@ -1,0 +1,13 @@
+import api from './axios';
+export const getBanners = () => api.get('/banners');
+export const getAdminBanners = () => api.get('/admin/banners');
+export const createBanner = (data) => api.post('/admin/banners', data);
+export const updateBanner = (id, data) => api.put(`/admin/banners/${id}`, data);
+export const deleteBanner = (id) => api.delete(`/admin/banners/${id}`);
+export const getPromoBanners = () => api.get('/banners?type=promo');
+export const getAdminBannersByType = (type) => api.get(`/admin/banners${type ? `?type=${type}` : ''}`);
+export const getServiceBadges = () => api.get('/banners/service-badges');
+export const getAdminServiceBadges = () => api.get('/admin/service-badges');
+export const createServiceBadge = (data) => api.post('/admin/service-badges', data);
+export const updateServiceBadge = (id, data) => api.put(`/admin/service-badges/${id}`, data);
+export const deleteServiceBadge = (id) => api.delete(`/admin/service-badges/${id}`);

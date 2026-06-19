@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans text-gray-900 bg-gray-50 dark:bg-zinc-950 dark:text-gray-100 transition-colors duration-200;
+  }
+}
+
+/* Trang trí 2 bên mép màn hình rộng — chỉ hiện khi có khoảng trống ngoài max-w-7xl,
+   thuần CSS nên không ảnh hưởng layout/DOM của bất kỳ component nào. */
+@media (min-width: 1300px) {
+  body::before,
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    width: 240px;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 50% 10%, rgba(37, 99, 235, 0.22), transparent 65%),
+      radial-gradient(circle at 50% 50%, rgba(8, 145, 178, 0.16), transparent 65%),
+      radial-gradient(circle at 50% 90%, rgba(37, 99, 235, 0.2), transparent 65%);
+  }
+  body::before { left: 0; }
+  body::after { right: 0; }
+
+  html.dark body::before,
+  html.dark body::after {
+    background:
+      radial-gradient(circle at 50% 10%, rgba(59, 130, 246, 0.3), transparent 65%),
+      radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.22), transparent 65%),
+      radial-gradient(circle at 50% 90%, rgba(59, 130, 246, 0.24), transparent 65%);
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-blue-600 text-white px-5 py-2.5 rounded-full font-semibold shadow-soft hover:bg-blue-700 hover:shadow-glow transition-all duration-300;
+  }
+  .btn-outline {
+    @apply border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-5 py-2.5 rounded-full font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 transition-all duration-300;
+  }
+  .card {
+    @apply bg-white dark:bg-gray-800 rounded-2xl shadow-soft border border-gray-100 dark:border-gray-700 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300;
+  }
+  .input-field {
+    @apply w-full border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all;
+  }
+  .glass {
+    @apply bg-white/85 dark:bg-zinc-900/80 backdrop-blur-md;
+  }
+  .section-title {
+    @apply font-display font-bold text-gray-900 dark:text-white tracking-tight;
+  }
+}
