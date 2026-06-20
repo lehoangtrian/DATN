@@ -413,7 +413,14 @@ const updateOrderStatus = async (req, res, next) => {
     if (trackingCode) update.trackingCode = trackingCode;
     if (status === 'delivered') update.deliveredAt = new Date();
 
-    await Order.findByIdAndUpdate(req.params.id, update);
+    const updatedOrder = await Order.findOneAndUpdate(
+      { _id: req.params.id, status: order.status },
+      update,
+      { new: true }
+    );
+    if (!updatedOrder) {
+      return error(res, 'Trạng thái đơn hàng đã bị thay đổi, vui lòng tải lại trang', 400);
+    }
 
     // Khi admin hủy đơn: hoàn stock, hoàn ví (nếu đã trả qua ví), rollback coupon
     if (status === 'cancelled') {
@@ -708,8 +715,19 @@ const getReturnRequests = async (req, res, next) => {
 const updateReturnRequest = async (req, res, next) => {
   try {
     const { status, adminNote, refundAmount, refundMethod, refundRef } = req.body;
-    const returnReq = await ReturnRequest.findById(req.params.id);
+    let returnReq = await ReturnRequest.findById(req.params.id);
     if (!returnReq) return error(res, 'Không tìm thấy yêu cầu trả hàng', 404);
+
+    // Atomic Guard: Chốt trạng thái trước để chống Double Refund nếu 2 admin cùng click
+    if (status && status !== returnReq.status) {
+      const locked = await ReturnRequest.findOneAndUpdate(
+        { _id: returnReq._id, status: returnReq.status },
+        { status }, // Đổi luôn trạng thái để khóa tiến trình khác
+        { new: true }
+      );
+      if (!locked) return error(res, 'Trạng thái đã bị thay đổi bởi người khác, vui lòng tải lại', 400);
+      returnReq = locked; // Cập nhật lại bản sao nội bộ
+    }
 
     // Fetch 1 lần, dùng lại cho cả việc cap refundAmount và tính trừ điểm theo tỉ lệ ở dưới
     const orderForCap = await Order.findById(returnReq.orderId).lean();

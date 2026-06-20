@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Cart, ProductVariant } = require('../models/index');
 const { success, error } = require('../utils/response.utils');
 
@@ -152,7 +153,9 @@ const clearCart = async (req, res, next) => {
 const holdStock = async (req, res, next) => {
   try {
     const cart = await Cart.findOne({ userId: req.user._id });
-    if (!cart || !cart.items.length) return error(res, 'Giỏ hàng trống', 400);
+    if (!cart || !cart.items.length) {
+      return error(res, 'Giỏ hàng trống', 400);
+    }
 
     const { variantIds } = req.body;
     // Nếu có variantIds, chỉ hold những items được chọn (partial checkout)
@@ -160,30 +163,36 @@ const holdStock = async (req, res, next) => {
       ? cart.items.filter((i) => variantIds.includes(i.variantId.toString()))
       : cart.items;
 
-    if (!itemsToHold.length) return error(res, 'Không có sản phẩm nào được chọn', 400);
+    if (!itemsToHold.length) {
+      return error(res, 'Không có sản phẩm nào được chọn', 400);
+    }
 
     const holdExpiry = new Date(Date.now() + HOLD_DURATION_MS);
 
-    // Bỏ qua item đã đang giữ hàng còn hiệu lực — tránh trừ kho 2 lần nếu user gọi
-    // /cart/hold nhiều lần (vd refresh trang, retry sau lỗi mạng) cho cùng 1 item.
+    // Bỏ qua item đã đang giữ hàng còn hiệu lực
     const needHold = itemsToHold.filter((i) => !isActivelyHeld(i));
 
-    // Trừ THẬT vào kho — atomic per-item, có rollback nếu giữa đường thiếu hàng.
-    // Đây là điểm mấu chốt chống race condition: 2 request /cart/hold cùng lúc cho
-    // cùng 1 sản phẩm sẽ không thể cùng "pass" vì $gte là điều kiện atomic ở tầng DB,
-    // không phải kiểm tra rồi mới ghi (check-then-act) như cách cũ.
-    const reservations = [];
+    const successfullyReserved = [];
+
+    // Trừ THẬT vào kho (Manual Rollback - Hỗ trợ MongoDB Local Standalone)
     for (const item of needHold) {
       const updated = await ProductVariant.findOneAndUpdate(
         { _id: item.variantId, stock: { $gte: item.quantity } },
         { $inc: { stock: -item.quantity } },
         { new: true }
       );
-      if (!updated) {
-        // Rollback các item đã trừ thành công trong batch này trước khi báo lỗi
-        await Promise.allSettled(
-          reservations.map((r) => ProductVariant.findByIdAndUpdate(r.variantId, { $inc: { stock: r.quantity } }))
-        );
+      
+      if (updated) {
+        successfullyReserved.push(item);
+      } else {
+        // Tự động Rollback thủ công toàn bộ các item đã trừ thành công trước đó
+        for (const resItem of successfullyReserved) {
+           await ProductVariant.findByIdAndUpdate(
+             resItem.variantId,
+             { $inc: { stock: resItem.quantity } }
+           );
+        }
+        
         const variant = await ProductVariant.findById(item.variantId).populate('productId', 'name').lean();
         const fresh = await ProductVariant.findById(item.variantId).select('stock').lean();
         return res.status(400).json({
@@ -197,10 +206,9 @@ const holdStock = async (req, res, next) => {
           }],
         });
       }
-      reservations.push({ variantId: item.variantId, quantity: item.quantity });
     }
 
-    // Đặt/refresh holdExpiry cho toàn bộ items được chọn (gồm cả item đã hold từ trước)
+    // Đặt/refresh holdExpiry cho toàn bộ items được chọn
     const holdSet = new Set(itemsToHold.map((i) => i.variantId.toString()));
     cart.items.forEach((item) => {
       if (holdSet.has(item.variantId.toString())) {

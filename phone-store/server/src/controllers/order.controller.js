@@ -539,14 +539,17 @@ const getOrderById = async (req, res, next) => {
 // PUT /api/orders/:id/cancel
 const cancelOrder = async (req, res, next) => {
   try {
-    const order = await Order.findOne({ _id: req.params.id, userId: req.user._id });
-    if (!order) return error(res, 'Không tìm thấy đơn hàng', 404);
-    if (!['pending', 'confirmed'].includes(order.status)) {
-      return error(res, 'Không thể hủy đơn hàng ở trạng thái này', 400);
-    }
+    const order = await Order.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user._id, status: { $in: ['pending', 'confirmed'] } },
+      { status: 'cancelled', cancelReason: req.body.reason || 'Khách hàng hủy' },
+      { new: true } // Trả về doc đã update
+    );
 
-    order.status = 'cancelled';
-    order.cancelReason = req.body.reason || 'Khách hàng hủy';
+    if (!order) {
+      const existing = await Order.findOne({ _id: req.params.id, userId: req.user._id });
+      if (!existing) return error(res, 'Không tìm thấy đơn hàng', 404);
+      return error(res, 'Không thể hủy đơn hàng ở trạng thái này (hoặc đã bị thay đổi)', 400);
+    }
 
     // Nếu đã thanh toán bằng ví → hoàn tiền vào ví ngay
     if (order.paymentMethod === 'wallet' && order.paymentStatus === 'paid') {

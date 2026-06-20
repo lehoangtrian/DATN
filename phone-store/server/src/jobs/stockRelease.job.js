@@ -8,26 +8,42 @@ const startStockReleaseJob = () => {
   cron.schedule('* * * * *', async () => {
     try {
       const now = new Date();
+      // Tìm các giỏ hàng có item hết hạn giữ hàng
       const cartsWithExpired = await Cart.find({ 'items.holdExpiry': { $lt: now } }).lean();
       if (!cartsWithExpired.length) return;
 
-      const restoreOps = [];
+      let totalRestored = 0;
+      let modifiedCarts = 0;
+
       for (const cart of cartsWithExpired) {
-        for (const item of cart.items) {
-          if (item.holdExpiry && item.holdExpiry < now) {
-            restoreOps.push(ProductVariant.findByIdAndUpdate(item.variantId, { $inc: { stock: item.quantity } }));
-          }
+        // Atomic Update: Unset cờ holdExpiry TRƯỚC và lấy về document CŨ.
+        // Chỉ tiến trình nào unset thành công mới được phép cộng trả kho.
+        const oldCart = await Cart.findOneAndUpdate(
+          { _id: cart._id, 'items.holdExpiry': { $lt: now } },
+          { $unset: { 'items.$[expired].holdExpiry': '' } },
+          { arrayFilters: [{ 'expired.holdExpiry': { $lt: now } }], new: false }
+        );
+
+        // Nếu null tức là tiến trình khác (hoặc user) đã dọn dẹp giỏ hàng này rồi
+        if (!oldCart) continue;
+
+        // Chỉ khôi phục những item có holdExpiry đã thực sự bị unset trong oldCart
+        const restoredItems = oldCart.items.filter(item => item.holdExpiry && item.holdExpiry < now);
+        
+        if (restoredItems.length > 0) {
+          modifiedCarts++;
+          totalRestored += restoredItems.length;
+          
+          const restoreOps = restoredItems.map(item =>
+            ProductVariant.findByIdAndUpdate(item.variantId, { $inc: { stock: item.quantity } })
+          );
+          // Cộng kho bằng Promise.allSettled để nếu 1 item lỗi thì các item khác vẫn được cộng
+          await Promise.allSettled(restoreOps);
         }
       }
-      await Promise.allSettled(restoreOps);
 
-      const result = await Cart.updateMany(
-        { 'items.holdExpiry': { $lt: now } },
-        { $unset: { 'items.$[expired].holdExpiry': '' } },
-        { arrayFilters: [{ 'expired.holdExpiry': { $lt: now } }] }
-      );
-      if (result.modifiedCount > 0) {
-        logger.info(`[StockRelease] Hoàn kho + giải phóng hold cho ${result.modifiedCount} giỏ hàng (${restoreOps.length} item)`);
+      if (modifiedCarts > 0) {
+        logger.info(`[StockRelease] Hoàn kho + giải phóng hold cho ${modifiedCarts} giỏ hàng (${totalRestored} item)`);
       }
     } catch (err) {
       logger.error(`[StockRelease] Lỗi: ${err.message}`);
