@@ -1,0 +1,59 @@
+@startuml
+title Activity Diagram - Luồng đặt hàng (góc nhìn khách hàng)
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+
+start
+:Thêm sản phẩm vào giỏ hàng;
+:Vào trang Thanh toán;
+:Chọn / nhập địa chỉ giao hàng;
+:Chọn phương thức vận chuyển;
+
+if (Có mã giảm giá?) then (có)
+  :Nhập mã giảm giá;
+  if (Mã hợp lệ?\n(còn hạn, đủ đơn tối thiểu,\nđúng hạng thành viên)) then (hợp lệ)
+    :Áp dụng giảm giá;
+  else (không hợp lệ)
+    :Hiển thị lỗi mã giảm giá;
+    stop
+  endif
+else (không)
+endif
+
+if (Dùng điểm thưởng?) then (có)
+  if (Đủ điểm?) then (đủ)
+    :Trừ tiền theo điểm sử dụng;
+  else (không đủ)
+    :Hiển thị lỗi không đủ điểm;
+    stop
+  endif
+else (không)
+endif
+
+:Chọn phương thức thanh toán\n(COD / Ví / VNPay);
+
+if (Còn hàng đủ số lượng?) then (còn)
+  :Tạo đơn hàng;
+  :Trừ tồn kho từng sản phẩm;
+else (hết hàng)
+  :Hiển thị lỗi hết hàng;
+  stop
+endif
+
+if (Phương thức = VNPay?) then (có)
+  :Chuyển hướng tới cổng VNPay;
+  if (Thanh toán thành công?) then (thành công)
+    :Cập nhật paymentStatus = paid;
+  else (thất bại)
+    :Giữ đơn ở trạng thái\nchờ thanh toán / hủy tự động;
+    stop
+  endif
+else (COD / Ví)
+endif
+
+:Gửi thông báo xác nhận đơn hàng;
+:Hiển thị trang đặt hàng thành công;
+stop
+
+@enduml

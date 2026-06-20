@@ -1,0 +1,117 @@
+@startuml
+title Class Diagram - Nhóm Sản phẩm và Mua hàng
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+hide circle
+
+class User {
+  -name: String
+  -email: String
+  -phone: String
+  -password: String
+  -role: String
+  -memberTier: String
+  -totalSpent: Number
+  -loyaltyPoints: Number
+  -walletBalance: Number
+  -addresses: Address[]
+  +register()
+  +login()
+  +updateProfile()
+}
+
+class Brand {
+  -name: String
+  -slug: String
+  -logo: String
+  -type: String
+}
+
+class Category {
+  -name_vi: String
+  -name_en: String
+  -slug: String
+  -type: String
+  -parentId: ObjectId
+}
+
+class Product {
+  -name: String
+  -slug: String
+  -description: String
+  -specs: Object
+  -status: String
+  -badge: String
+  -rating: Number
+  -reviewCount: Number
+  -sold: Number
+  +getDetail()
+  +search()
+}
+
+class ProductVariant {
+  -storage: String
+  -color: String
+  -price: Number
+  -salePrice: Number
+  -stock: Number
+  -sku: String
+  +reserveStock()
+  +releaseStock()
+}
+
+class Cart {
+  -items: CartItem[]
+  -couponCode: String
+  -discountAmount: Number
+  +addItem()
+  +removeItem()
+  +holdStock()
+}
+
+class CartItem <<embedded>> {
+  -variantId: ObjectId
+  -productId: ObjectId
+  -quantity: Number
+  -price: Number
+  -holdExpiry: Date
+}
+
+class Order {
+  -orderCode: String
+  -items: OrderItem[]
+  -shippingAddress: Object
+  -paymentMethod: String
+  -paymentStatus: String
+  -subtotal: Number
+  -discountAmount: Number
+  -totalPrice: Number
+  -pointsUsed: Number
+  -pointsEarned: Number
+  -status: String
+  -deliveredAt: Date
+  +createOrder()
+  +cancelOrder()
+  +updateStatus()
+}
+
+class OrderItem <<embedded>> {
+  -productId: ObjectId
+  -variantId: ObjectId
+  -price: Number
+  -quantity: Number
+  -flashSaleId: ObjectId
+}
+
+User "1" -- "0..*" Order : đặt
+User "1" -- "1" Cart : sở hữu
+Brand "1" -- "0..*" Product : thuộc hãng
+Category "1" -- "0..*" Product : thuộc danh mục
+Product "1" -- "1..*" ProductVariant : có phiên bản
+Cart "1" *-- "0..*" CartItem : gồm
+CartItem "0..*" -- "1" ProductVariant : tham chiếu
+Order "1" *-- "1..*" OrderItem : gồm
+OrderItem "0..*" -- "1" ProductVariant : tham chiếu
+
+@enduml

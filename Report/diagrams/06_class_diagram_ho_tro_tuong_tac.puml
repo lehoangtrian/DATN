@@ -1,0 +1,117 @@
+@startuml
+title Class Diagram - Nhóm Hỗ trợ và Tương tác khách hàng
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+hide circle
+
+class Review {
+  -userId: ObjectId
+  -productId: ObjectId
+  -orderId: ObjectId
+  -rating: Number
+  -comment: String
+  -images: String[]
+  -isVerifiedPurchase: Boolean
+  -isApproved: Boolean
+  -reply: String
+  +createReview()
+  +reply()
+}
+
+class Wishlist {
+  -userId: ObjectId
+  -productId: ObjectId
+}
+
+class ReturnRequest {
+  -orderId: ObjectId
+  -userId: ObjectId
+  -items: ReturnItem[]
+  -reason: String
+  -status: String
+  -refundAmount: Number
+  -refundMethod: String
+  -adminNote: String
+  +createReturn()
+  +approve()
+  +reject()
+}
+
+class ChatSession {
+  -userId: ObjectId
+  -status: String
+  -assignedTo: ObjectId
+  -lastMessageAt: Date
+  -unreadByAdmin: Number
+  +open()
+  +assign()
+  +close()
+}
+
+class ChatMessage {
+  -sessionId: ObjectId
+  -sender: String
+  -senderId: ObjectId
+  -text: String
+  -actions: Action[]
+  -metadata: Object
+  +send()
+}
+
+class Notification {
+  -userId: ObjectId
+  -title: String
+  -content: String
+  -type: String
+  -channel: String
+  -isRead: Boolean
+  -link: String
+  +markAsRead()
+}
+
+class OTP {
+  -userId: ObjectId
+  -contact: String
+  -code: String
+  -type: String
+  -isUsed: Boolean
+  -expiresAt: Date
+  +verify()
+  +generate()
+}
+
+class Banner {
+  -type: String
+  -title: String
+  -link: String
+  -imageUrl: String
+  -order: Number
+}
+
+class ServiceBadge {
+  -title: String
+  -iconName: String
+  -description: String
+  -order: Number
+}
+
+User "1" -- "0..*" Review : viết
+Product "1" -- "0..*" Review : được đánh giá
+Order "0..1" -- "0..1" Review : minh chứng mua hàng
+
+User "1" -- "0..*" Wishlist : lưu
+Product "1" -- "0..*" Wishlist : được lưu
+
+User "1" -- "0..*" ReturnRequest : gửi yêu cầu
+Order "1" -- "0..1" ReturnRequest : phát sinh
+Product "0..*" -- "0..*" ReturnRequest : trả hàng
+
+User "1" -- "0..*" ChatSession : mở
+ChatSession "1" *-- "0..*" ChatMessage : chứa
+User "0..1" -- "0..*" ChatMessage : gửi
+
+User "1" -- "0..*" Notification : nhận
+User "0..1" -- "0..*" OTP : xác thực
+
+@enduml

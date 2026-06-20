@@ -1,0 +1,37 @@
+@startuml
+title State Diagram - Vòng đời đơn hàng (Order)
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+
+[*] --> Pending : Khách đặt hàng
+
+Pending --> Confirmed : Admin xác nhận
+Pending --> Cancelled : Khách hủy /\nTự động hủy sau 30 phút
+
+Confirmed --> Cancelled : Khách / Admin hủy
+Confirmed --> Preparing : Admin chuẩn bị hàng
+
+Preparing --> Shipping : Giao cho đơn vị vận chuyển
+
+Shipping --> Delivered : Giao hàng thành công
+
+Delivered --> ReturnRequested : Khách yêu cầu trả hàng\n(trong 7 ngày)
+
+ReturnRequested --> Returned : Admin duyệt, hoàn tiền
+ReturnRequested --> Delivered : Admin từ chối yêu cầu
+
+Cancelled --> [*]
+Returned --> [*]
+
+note right of Delivered
+  Tích điểm thưởng cho khách
+  ngay khi vào trạng thái này
+end note
+
+note right of Pending
+  Trừ tồn kho, giữ chỗ Flash Sale /
+  mã giảm giá ngay khi tạo đơn
+end note
+
+@enduml

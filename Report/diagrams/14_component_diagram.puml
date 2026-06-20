@@ -1,0 +1,57 @@
+@startuml
+title Component Diagram - Các thành phần logic của hệ thống
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+
+component [Web Client\n(React SPA)] as Client
+
+interface "IAuth" as IAuth
+interface "IProduct" as IProduct
+interface "IOrder" as IOrder
+interface "IPayment" as IPayment
+interface "ILoyalty" as ILoyalty
+interface "INotification" as INotification
+interface "IChatbot" as IChatbot
+
+component [Auth Service] as Auth
+component [Product Service] as ProductSvc
+component [Order Service] as OrderSvc
+component [Payment Service] as PaymentSvc
+component [Loyalty Service] as LoyaltySvc
+component [Notification Service] as NotiSvc
+component [Chatbot Service\n(Python)] as ChatbotSvc
+database "MongoDB" as DB
+
+Auth -up- IAuth
+ProductSvc -up- IProduct
+OrderSvc -up- IOrder
+PaymentSvc -up- IPayment
+LoyaltySvc -up- ILoyalty
+NotiSvc -up- INotification
+ChatbotSvc -up- IChatbot
+
+Client --> IAuth
+Client --> IProduct
+Client --> IOrder
+Client --> IPayment
+Client --> ILoyalty
+Client --> INotification
+Client --> IChatbot
+
+OrderSvc ..> IProduct : sử dụng
+OrderSvc ..> IPayment : sử dụng
+OrderSvc ..> ILoyalty : sử dụng
+OrderSvc ..> INotification : sử dụng
+ChatbotSvc ..> IProduct : sử dụng
+ChatbotSvc ..> IOrder : sử dụng
+ChatbotSvc ..> ILoyalty : sử dụng
+
+Auth --> DB
+ProductSvc --> DB
+OrderSvc --> DB
+PaymentSvc --> DB
+LoyaltySvc --> DB
+NotiSvc --> DB
+
+@enduml

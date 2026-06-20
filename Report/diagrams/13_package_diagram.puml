@@ -1,0 +1,58 @@
+@startuml
+title Package Diagram - Tổ chức module hệ thống
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+skinparam nodesep 50
+skinparam ranksep 50
+
+package "Client (React)" {
+  package "pages" as ClientPages
+  package "components" as ClientComponents
+  package "hooks" as ClientHooks
+  package "context" as ClientContext
+  package "api" as ClientApi
+}
+
+package "Server (Node.js / Express)" {
+  package "routes" as Routes
+  package "controllers" as Controllers
+  package "models" as Models
+  package "middlewares" as Middlewares
+  package "jobs (cron)" as Jobs
+  package "utils" as Utils
+  package "validations" as Validations
+}
+
+package "Bot (Python FastAPI)" {
+  package "main" as BotMain
+  package "intent" as BotIntent
+  package "actions" as BotActions
+  package "templates" as BotTemplates
+  package "llm" as BotLLM
+}
+
+ClientComponents -[hidden]right-> ClientHooks
+ClientHooks -[hidden]right-> ClientContext
+ClientContext -[hidden]right-> ClientApi
+
+ClientPages -down-> ClientComponents
+ClientPages -down-> ClientHooks
+ClientPages -down-> ClientContext
+ClientPages -down-> ClientApi
+ClientApi -down-> Routes : HTTP REST
+
+Routes --> Middlewares
+Routes --> Validations
+Routes --> Controllers
+Controllers --> Models
+Controllers --> Utils
+Controllers --> Jobs
+
+BotMain --> BotIntent
+BotMain --> BotActions
+BotMain --> BotLLM
+BotActions --> BotTemplates
+BotActions --> Routes : HTTP\n(lấy dữ liệu thật)
+
+@enduml

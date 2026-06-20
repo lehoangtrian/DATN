@@ -107,6 +107,18 @@ INTENTS = {
         "weight": 1.2,
         "threshold": 0.08,
     },
+    "check_points": {
+        # Tách riêng khỏi check_wallet — "còn bao nhiêu" của check_wallet trùng với câu hỏi
+        # điểm thưởng (vd "Điểm thưởng của tôi còn bao nhiêu") nên trước đây bị nhận nhầm
+        # thành hỏi số dư VÍ (sai hệ thống hoàn toàn) — đã verify bug này qua test thật.
+        "keywords": [
+            "điểm thưởng", "điểm tích lũy", "tích điểm", "tích lũy điểm",
+            "đổi điểm", "bao nhiêu điểm", "điểm của tôi", "hạng thành viên",
+            "hạng hiện tại", "lên hạng", "tích được bao nhiêu",
+        ],
+        "weight": 1.3,
+        "threshold": 0.1,
+    },
     "validate_coupon": {
         "keywords": [
             "mã giảm giá", "coupon", "voucher", "mã khuyến mãi",
@@ -173,6 +185,14 @@ INTENTS = {
         "weight": 1.2,
         "threshold": 0.09,
     },
+    "cancel_order": {
+        "keywords": [
+            "hủy đơn", "hủy được không", "có thể hủy", "muốn hủy",
+            "hủy mua hàng", "hủy đặt hàng", "cancel đơn", "hủy order",
+        ],
+        "weight": 1.3,
+        "threshold": 0.1,
+    },
 }
 
 BRANDS = [
@@ -223,6 +243,32 @@ def _extract_category(text: str) -> str | None:
         if keyword in norm:
             return slug
     return None
+
+
+_GENERIC_CHARGER_RE = re.compile(r'\bsac\b')
+_GENERIC_ACCESSORY_RE = re.compile(r'\b(phu kien|sac)\b')
+
+# "sạc" chung (không rõ nhanh/không dây) ứng với nhiều category thật cùng lúc — tất cả
+# sản phẩm liên quan tới việc sạc máy (sạc nhanh, sạc không dây, cáp sạc).
+GENERIC_CHARGER_CATEGORIES = ["sac-nhanh", "sac-khong-day", "cap-sac"]
+
+
+def _is_generic_charger_query(text: str) -> bool:
+    """True nếu câu hỏi nhắc tới "sạc" chung (vd "sạc điện thoại") nhưng KHÔNG khớp
+    category cụ thể (sạc nhanh/sạc không dây) — gọi SAU khi _extract_category() trả về
+    None. Tách riêng khỏi phụ kiện chung vì "sạc" nên trả về nhóm category liên quan tới
+    sạc (sac-nhanh + sac-khong-day + cap-sac) thay vì browse TOÀN BỘ phụ kiện (sẽ lẫn cả
+    ốp lưng/tai nghe không liên quan) — đã verify qua test thật: hỏi "sạc điện thoại" mà
+    chỉ browse accessory chung sẽ trả về cả ốp lưng, tai nghe lẫn vào kết quả."""
+    return bool(_GENERIC_CHARGER_RE.search(_normalize(text)))
+
+
+def _is_generic_accessory_query(text: str) -> bool:
+    """True nếu câu hỏi nhắc tới phụ kiện chung (vd "phụ kiện điện thoại", "sạc điện
+    thoại") nhưng KHÔNG khớp category cụ thể nào trong CATEGORY_KEYWORDS (tai nghe, sạc
+    nhanh, sạc không dây, ốp lưng...) — gọi hàm này SAU khi _extract_category() đã trả về
+    None để tránh "sạc nhanh"/"sạc không dây" bị bắt nhầm vào nhánh generic này."""
+    return bool(_GENERIC_ACCESSORY_RE.search(_normalize(text)))
 
 
 def _extract_coupon_code(text: str) -> str | None:
@@ -289,14 +335,25 @@ _NOISE_SUFFIX = re.compile(
     r'|khong|nao|gi|co|duoc|ban|o dau|nhu the nao|thi sao|gia|nhat'
     r'|con hang|het hang|mau gi|mau nao|con mau|con khong|gia bao'
     r'|specs|thong so|chi tiet|mua duoc khong|mua duoc'
+    r'|cai nao tot hon|tot hon|ngon hon|re hon|hon han|hon'
     r'|vay|nhe|nha|the|di|thoi|a|ha)\s*$'
 )
 
+# "còn màu đen", "có màu xanh dương", "màu titan tự nhiên không" — tên màu CỤ THỂ (không
+# phải từ phiếm chỉ như "gì"/"nào" đã có trong _NOISE_SUFFIX) phải bị cắt khỏi cuối câu,
+# nếu không query tìm kiếm sẽ thành "iphone 15 con mau den" — không khớp substring tên sản
+# phẩm nào → search_products() trả về 0 kết quả → model mất hết context thật, BỊA ra tồn
+# kho/màu sắc (đã verify bug này qua test thật: hỏi "iPhone 15 còn màu đen không", máy thực
+# tế CÒN HÀNG màu đen nhưng bot trả lời "hết hàng"). Cắt từ "(con/co) mau" tới hết câu —
+# không giới hạn số từ vì có màu ghép nhiều từ ("titan tu nhien", "xanh duong").
+_COLOR_SUFFIX = re.compile(r'\s+(?:con\s+|co\s+)?mau\b.*$')
+
 
 def _strip_noise_suffix(s: str) -> str:
-    """Áp dụng _NOISE_SUFFIX lặp lại đến khi ổn định — vì câu có thể có nhiều
-    noise word liên tiếp ở cuối (vd "co ban khong" → xóa "ban khong" còn lại "co",
+    """Áp dụng _COLOR_SUFFIX rồi _NOISE_SUFFIX lặp lại đến khi ổn định — vì câu có thể có
+    nhiều noise word liên tiếp ở cuối (vd "co ban khong" → xóa "ban khong" còn lại "co",
     phải xóa tiếp "co")."""
+    s = _COLOR_SUFFIX.sub('', s).strip()
     prev = None
     while prev != s:
         prev = s
@@ -349,6 +406,28 @@ def _extract_search_query(text: str) -> str:
     q_norm = _strip_noise_suffix(q_norm)
     q_norm = re.sub(r'[?!.,;:]+$', '', q_norm).strip()
     return q_norm if len(q_norm) > 2 else ""
+
+
+_COMPARE_SEP_RE = re.compile(r'\b(so voi|hoac|hay|voi|va|vs)\b')
+
+
+def _extract_compare_targets(text: str) -> list[str] | None:
+    """Tách câu 'so sánh A với B' / 'A hay B' / 'A vs B' thành 2 query tìm kiếm RIÊNG.
+    search_products() match substring tên sản phẩm trên server, nên nếu ghép cả 2 tên vào
+    1 câu duy nhất (vd "iPhone 15 Pro với Samsung Galaxy A55") sẽ luôn ra 0 kết quả — không
+    sản phẩm nào có tên chứa cả 2 cụm đó. Đã verify bug này qua test thật: hỏi so sánh 2
+    máy cụ thể, bot không tìm được gì nên trả lời chung chung không có số liệu thật."""
+    norm = _normalize(text)
+    m = _COMPARE_SEP_RE.search(norm)
+    if not m:
+        return None
+    left_raw = text[:m.start()].strip()
+    right_raw = text[m.end():].strip()
+    left_q = _extract_search_query(left_raw)
+    right_q = _extract_search_query(right_raw)
+    if left_q and right_q:
+        return [left_q, right_q]
+    return None
 
 
 def detect_intent(text: str) -> Tuple[str, float, dict]:

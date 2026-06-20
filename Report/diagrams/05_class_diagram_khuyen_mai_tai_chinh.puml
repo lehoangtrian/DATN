@@ -1,0 +1,111 @@
+@startuml
+title Class Diagram - Nhóm Khuyến mãi và Tài chính
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+hide circle
+
+class FlashSale {
+  -type: String
+  -productId: ObjectId
+  -variantId: ObjectId
+  -categoryId: ObjectId
+  -originalPrice: Number
+  -salePrice: Number
+  -discountType: String
+  -discountValue: Number
+  -quantity: Number
+  -sold: Number
+  -limitPerUser: Number
+  -startTime: Date
+  -endTime: Date
+  +isActive()
+  +reserveSoldCount()
+}
+
+class Coupon {
+  -code: String
+  -type: String
+  -value: Number
+  -minOrderValue: Number
+  -maxDiscountAmount: Number
+  -usageLimit: Number
+  -usedCount: Number
+  -userUsageLimit: Number
+  -allowedUserId: ObjectId
+  -userType: String
+  -startDate: Date
+  -endDate: Date
+  +validate()
+  +apply()
+}
+
+class Payment {
+  -orderId: ObjectId
+  -method: String
+  -amount: Number
+  -status: String
+  -transactionId: String
+  -refundStatus: String
+  +createPayment()
+  +confirmIPN()
+}
+
+class WalletTransaction {
+  -userId: ObjectId
+  -type: String
+  -amount: Number
+  -balanceAfter: Number
+  -orderId: ObjectId
+  -returnId: ObjectId
+  -description: String
+}
+
+class TopupRequest {
+  -userId: ObjectId
+  -amount: Number
+  -ref: String
+  -status: String
+  -confirmedAt: Date
+}
+
+class WithdrawalRequest {
+  -userId: ObjectId
+  -amount: Number
+  -bankName: String
+  -accountNumber: String
+  -status: String
+}
+
+class StockLog {
+  -variantId: ObjectId
+  -productId: ObjectId
+  -type: String
+  -quantity: Number
+  -stockBefore: Number
+  -stockAfter: Number
+  -orderId: ObjectId
+  -adminId: ObjectId
+}
+
+User "1" -- "0..*" WalletTransaction : phát sinh
+User "1" -- "0..*" TopupRequest : yêu cầu nạp
+User "1" -- "0..*" WithdrawalRequest : yêu cầu rút
+User "0..*" -- "0..1" Coupon : allowedUserId
+User "0..*" -- "0..*" Coupon : usedBy
+
+Order "0..1" -- "0..*" WalletTransaction : liên quan
+Order "1" -- "0..*" Payment : được thanh toán
+Order "0..*" -- "0..1" FlashSale : áp dụng
+Order "1" -- "0..*" StockLog : ghi vết tồn kho
+
+ReturnRequest "0..1" -- "0..*" WalletTransaction : hoàn tiền
+
+ProductVariant "0..1" -- "0..*" FlashSale : được giảm giá
+ProductVariant "1" -- "0..*" StockLog : ghi vết
+
+Category "0..1" -- "0..*" FlashSale : sale theo danh mục
+Brand "0..*" -- "0..*" Coupon : applicableBrands
+Category "0..*" -- "0..*" Coupon : applicableCategories
+
+@enduml

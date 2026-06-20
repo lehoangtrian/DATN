@@ -1,0 +1,67 @@
+@startuml
+title Sequence Diagram - Đặt hàng (Checkout)
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+skinparam maxMessageSize 160
+
+actor "Khách hàng" as Customer
+participant "Giao diện\n(React Client)" as UI
+participant "OrderController" as Ctrl
+participant "Coupon" as CouponDB
+participant "FlashSale" as FlashDB
+participant "ProductVariant" as VariantDB
+participant "User" as UserDB
+participant "Order" as OrderDB
+participant "StockLog" as LogDB
+
+Customer -> UI : Chọn sản phẩm, địa chỉ,\nphương thức thanh toán, bấm Đặt hàng
+UI -> Ctrl : POST /api/orders
+
+Ctrl -> VariantDB : Kiểm tra tồn kho từng sản phẩm
+VariantDB --> Ctrl : Trả về tồn kho hiện tại
+
+opt Có áp dụng Flash Sale
+  Ctrl -> FlashDB : Kiểm tra điều kiện\n(thời gian, giới hạn/người)
+  FlashDB --> Ctrl : Hợp lệ
+  Ctrl -> FlashDB : Tăng "sold" (atomic,\ncó điều kiện $expr)
+end
+
+opt Có mã giảm giá
+  Ctrl -> CouponDB : Kiểm tra hạn, đơn tối thiểu,\nhạng thành viên, lượt dùng
+  CouponDB --> Ctrl : Hợp lệ
+  Ctrl -> CouponDB : Tăng "usedCount" (atomic)
+end
+
+opt Dùng điểm thưởng
+  Ctrl -> UserDB : Kiểm tra đủ điểm
+  UserDB --> Ctrl : Hợp lệ
+end
+
+Ctrl -> Ctrl : Tính subtotal, discount,\nphí vận chuyển, tổng tiền
+
+alt Thanh toán bằng ví
+  Ctrl -> UserDB : Trừ walletBalance (atomic)
+  UserDB --> Ctrl : Thành công
+end
+
+Ctrl -> OrderDB : Tạo Order (snapshot giá,\nmã giảm giá, điểm dùng)
+OrderDB --> Ctrl : orderCode
+
+loop Mỗi sản phẩm trong đơn
+  Ctrl -> VariantDB : Trừ stock (atomic, có điều kiện)
+  VariantDB --> Ctrl : Thành công
+  Ctrl -> LogDB : Ghi StockLog (type=sell)
+end
+
+Ctrl -> UI : Trả về Order + orderCode
+UI -> Customer : Hiển thị xác nhận đặt hàng
+
+note over Ctrl
+  Nếu bất kỳ bước nào lỗi giữa chừng
+  (hết hàng, hết lượt mã giảm giá...),
+  hệ thống hoàn tác (rollback) các bước
+  atomic đã thực hiện trước đó.
+end note
+
+@enduml

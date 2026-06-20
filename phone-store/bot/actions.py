@@ -47,19 +47,25 @@ async def get_product_detail(slug: str) -> dict | None:
 async def get_products_filtered(
     brand: str | None = None,
     category: str | None = None,
+    categories: list[str] | None = None,
     product_type: str | None = None,
     min_price: int | None = None,
     max_price: int | None = None,
     sort: str = "price_asc",
     limit: int = 6,
 ) -> dict | None:
-    """GET /api/products với filter giá, thương hiệu, danh mục (category slug)."""
+    """GET /api/products với filter giá, thương hiệu, danh mục (category slug).
+    `categories` (nhiều slug, OR với nhau) dùng khi 1 từ khóa chung ứng với nhiều category
+    thật (vd "sạc" gồm cả sạc nhanh/sạc không dây/cáp sạc) — server hỗ trợ qua query
+    param `categories` riêng (phân biệt với `category` số ít, exact 1 slug)."""
     try:
         params: dict = {"limit": limit, "sort": sort}
         if brand:
             params["brand"] = brand
         if category:
             params["category"] = category
+        if categories:
+            params["categories"] = ",".join(categories)
         if product_type:
             params["productType"] = product_type
         if min_price is not None:
@@ -80,6 +86,17 @@ async def get_wallet(token: str) -> dict | None:
                 f"{NODE_API}/wallet/balance",
                 headers=_auth_headers(token),
             )
+            return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+async def get_profile(token: str) -> dict | None:
+    """GET /api/profile — không có endpoint riêng cho điểm thưởng, lấy chung từ profile
+    (data.loyaltyPoints, data.memberTier)."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{NODE_API}/profile", headers=_auth_headers(token))
             return r.json() if r.status_code == 200 else None
     except Exception:
         return None

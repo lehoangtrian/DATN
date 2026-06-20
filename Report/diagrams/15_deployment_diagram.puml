@@ -1,0 +1,29 @@
+@startuml
+title Deployment Diagram - Sơ đồ triển khai vật lý
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+
+node "Máy khách\n<<device>>" as ClientNode {
+  artifact "Web Browser\n(React SPA đã build)" as ClientArtifact
+}
+
+node "Application Server\n<<server>>" as AppServer {
+  artifact "Node.js Runtime\n(Express API + Socket.IO)" as NodeArtifact
+}
+
+node "AI Server\n<<server>>" as AIServer {
+  artifact "Python Runtime\n(FastAPI Bot)" as BotArtifact
+  artifact "Ollama Engine\n(LLM fine-tune)" as OllamaArtifact
+}
+
+node "Database Server\n<<server>>" as DBServer {
+  database "MongoDB" as Mongo
+}
+
+ClientNode -- AppServer : HTTPS / WSS
+AppServer -- DBServer : MongoDB Wire\nProtocol (Mongoose)
+AppServer -- AIServer : HTTP\n(REST nội bộ)
+BotArtifact -- OllamaArtifact : Local API\n(localhost:11434)
+
+@enduml

@@ -1,0 +1,26 @@
+@startuml
+title Collaboration Diagram - Đặt hàng (góc nhìn cộng tác giữa đối tượng)
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+
+object "khachHang : Customer" as Customer
+object "ctrl : OrderController" as Ctrl
+object "coupon : Coupon" as Coupon
+object "flashSale : FlashSale" as Flash
+object "variant : ProductVariant" as Variant
+object "user : User" as User
+object "order : Order" as Order
+object "log : StockLog" as Log
+
+Customer -- Ctrl : 1: datHang()
+Ctrl -- Variant : 2: kiemTraTonKho()
+Ctrl -- Flash : 3: kiemTraVaTangSold()
+Ctrl -- Coupon : 4: kiemTraVaTangUsedCount()
+Ctrl -- User : 5: kiemTraVaTruDiem() /\ntruViTienNeuChonVi()
+Ctrl -- Order : 6: taoDonHang()
+Ctrl -- Variant : 7: truTonKho()
+Ctrl -- Log : 8: ghiNhanStockLog()
+Ctrl -- Customer : 9: traVeOrderCode()
+
+@enduml

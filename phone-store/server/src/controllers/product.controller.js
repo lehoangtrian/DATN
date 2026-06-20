@@ -102,6 +102,17 @@ const listProducts = async (req, res, next) => {
       filter._id = { $in: intersection };
     }
 
+    // sort theo giá (price_asc/price_desc) chỉ tính được SAU KHI populate cheapestVariant
+    // (giá không nằm trên Product). Nếu skip/limit ngay ở query Mongo (sort tạm theo
+    // "newest") rồi mới sort giá ở JS sau đó như cũ, trang/limit sẽ cắt nhầm sản phẩm
+    // TRƯỚC KHI sắp xếp đúng theo giá — vd lọc theo tầm giá + limit nhỏ hơn tổng số sản
+    // phẩm khớp sẽ bỏ sót các sản phẩm giá cao/thấp nhất (đã verify bug này qua test thật:
+    // hỏi "điện thoại dưới 30 triệu" sort giảm dần, Samsung S24 Ultra/Xiaomi 14 Ultra giá
+    // cao nhất trong khoảng đó bị thiếu vì bị loại khỏi 5 "mới nhất" được lấy trước).
+    // Khi sort theo giá: lấy TOÀN BỘ sản phẩm khớp filter (không skip/limit ở Mongo), sort
+    // đúng theo giá hiệu dụng ở JS, rồi mới cắt trang bằng slice().
+    const isPriceSort = sort === 'price_asc' || sort === 'price_desc';
+
     const [total, products] = await Promise.all([
       Product.countDocuments(filter),
       Product.find(filter)
@@ -109,16 +120,21 @@ const listProducts = async (req, res, next) => {
         .populate('brandId', 'name slug logo')
         .populate('categoryId', 'name_vi slug')
         .sort(SORT_MAP[sort] || SORT_MAP.newest)
-        .skip((page - 1) * limit)
-        .limit(Number(limit))
+        .skip(isPriceSort ? 0 : (page - 1) * limit)
+        .limit(isPriceSort ? 0 : Number(limit))
         .lean(),
     ]);
 
-    const result = await populateCheapestVariants(products);
+    let result = await populateCheapestVariants(products);
 
     const ep = (p) => p.cheapestVariant?.salePrice || p.cheapestVariant?.price || 0;
     if (sort === 'price_asc')  result.sort((a, b) => ep(a) - ep(b));
     if (sort === 'price_desc') result.sort((a, b) => ep(b) - ep(a));
+
+    if (isPriceSort) {
+      const start = (page - 1) * limit;
+      result = result.slice(start, start + Number(limit));
+    }
 
     return paginate(res, result, total, page, limit);
   } catch (err) {

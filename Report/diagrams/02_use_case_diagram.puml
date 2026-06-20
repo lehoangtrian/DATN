@@ -1,0 +1,107 @@
+@startuml
+title Use Case Diagram - Hệ thống PhoneStore
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+skinparam packageStyle rectangle
+left to right direction
+
+actor "Khách (Guest)" as Guest
+actor "Khách hàng\n(Customer)" as Customer
+actor "Quản trị viên\n(Admin/Staff)" as Admin
+actor "Chatbot AI" as Bot
+actor "Cổng thanh toán\nVNPay" as VNPay
+
+Customer --|> Guest
+Admin --|> Customer
+
+rectangle "Hệ thống PhoneStore" {
+
+  rectangle "Tìm kiếm & xem sản phẩm" {
+    usecase "Xem danh sách sản phẩm" as UC1
+    usecase "Tìm kiếm / lọc sản phẩm" as UC2
+    usecase "Xem chi tiết sản phẩm" as UC3
+    usecase "So sánh sản phẩm" as UC4
+    usecase "Xem Flash Sale" as UC5
+  }
+
+  rectangle "Tài khoản" {
+    usecase "Đăng ký" as UC6
+    usecase "Đăng nhập\n(local / Google)" as UC7
+    usecase "Quên mật khẩu" as UC8
+    usecase "Quản lý hồ sơ\n& địa chỉ" as UC9
+  }
+
+  rectangle "Giỏ hàng & Thanh toán" {
+    usecase "Quản lý giỏ hàng" as UC10
+    usecase "Áp mã giảm giá" as UC11
+    usecase "Đặt hàng\n(checkout)" as UC12
+    usecase "Thanh toán VNPay" as UC13
+  }
+
+  rectangle "Đơn hàng & Đổi trả" {
+    usecase "Xem / hủy đơn hàng" as UC14
+    usecase "Yêu cầu trả hàng" as UC15
+  }
+
+  rectangle "Tương tác khách hàng" {
+    usecase "Đánh giá sản phẩm" as UC16
+    usecase "Quản lý wishlist" as UC17
+    usecase "Chat với hệ thống" as UC18
+  }
+
+  rectangle "Điểm thưởng & Ví" {
+    usecase "Xem điểm thưởng\n& hạng thành viên" as UC19
+    usecase "Đổi điểm sang mã giảm giá" as UC20
+    usecase "Quản lý ví điện tử\n(nạp / rút)" as UC21
+  }
+
+  rectangle "Quản trị hệ thống" {
+    usecase "Quản lý sản phẩm\n& danh mục" as UC22
+    usecase "Quản lý đơn hàng" as UC23
+    usecase "Quản lý người dùng" as UC24
+    usecase "Quản lý đổi trả" as UC25
+    usecase "Quản lý mã giảm giá\n& Flash Sale" as UC26
+    usecase "Quản lý đánh giá" as UC27
+    usecase "Xem báo cáo thống kê" as UC28
+    usecase "Hỗ trợ chat trực tiếp" as UC29
+  }
+}
+
+Guest --> UC1
+Guest --> UC2
+Guest --> UC3
+Guest --> UC4
+Guest --> UC5
+Guest --> UC6
+Guest --> UC7
+Guest --> UC8
+Guest --> UC18
+
+Customer --> UC9
+Customer --> UC10
+Customer --> UC11
+Customer --> UC12
+Customer --> UC14
+Customer --> UC15
+Customer --> UC16
+Customer --> UC17
+Customer --> UC19
+Customer --> UC20
+Customer --> UC21
+
+Admin --> UC22
+Admin --> UC23
+Admin --> UC24
+Admin --> UC25
+Admin --> UC26
+Admin --> UC27
+Admin --> UC28
+Admin --> UC29
+
+UC12 ..> UC13 : <<include>>
+UC18 ..> Bot : <<include>>
+UC13 ..> VNPay : <<include>>
+UC29 ..> UC18 : <<extend>>
+
+@enduml

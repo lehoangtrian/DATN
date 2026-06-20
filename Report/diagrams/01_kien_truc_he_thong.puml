@@ -1,0 +1,43 @@
+@startuml
+title Sơ đồ kiến trúc hệ thống PhoneStore
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam wrapWidth 200
+skinparam defaultFontSize 13
+
+package "Tầng giao diện (Client)" {
+  [Trình duyệt\n(React SPA - Vite)] as Client
+}
+
+package "Tầng ứng dụng (Application)" {
+  [Node.js / Express API\n(REST + Socket.IO)] as NodeAPI
+  [Python FastAPI\nChatbot Service] as Bot
+  [Ollama\n(LLM tự fine-tune)] as Ollama
+}
+
+package "Tầng dữ liệu (Data)" {
+  database "MongoDB" as DB
+}
+
+package "Tác vụ định kỳ (Cron Jobs)" {
+  [Tự hủy đơn quá hạn] as Cron1
+  [Giải phóng tồn kho giữ chỗ] as Cron2
+  [Tạo mã giảm giá sinh nhật] as Cron3
+}
+
+Client -down-> NodeAPI : HTTP REST API\n(JSON)
+Client -down-> NodeAPI : WebSocket\n(Socket.IO - chat, thông báo)
+NodeAPI -down-> DB : Mongoose ORM
+NodeAPI -right-> Bot : HTTP\n(forward câu hỏi khách)
+Bot -right-> Ollama : Sinh câu trả lời\n(LLM)
+Bot -up-> NodeAPI : HTTP\n(lấy dữ liệu thật:\nsản phẩm, đơn hàng,\ngiá, điểm thưởng...)
+Cron1 -up-> NodeAPI
+Cron2 -up-> NodeAPI
+Cron3 -up-> NodeAPI
+NodeAPI -down-> Cron1
+NodeAPI -down-> Cron2
+NodeAPI -down-> Cron3
+
+@enduml

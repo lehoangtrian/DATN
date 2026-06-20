@@ -1,0 +1,58 @@
+@startuml
+title Sequence Diagram - Yêu cầu trả hàng và hoàn tiền
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+skinparam maxMessageSize 160
+
+actor "Khách hàng" as Customer
+actor "Quản trị viên" as Admin
+participant "Client" as UI
+participant "ReturnController" as Ctrl
+participant "AdminController" as AdminCtrl
+participant "Order" as OrderDB
+participant "ReturnRequest" as ReturnDB
+participant "User" as UserDB
+participant "WalletTransaction" as WalletDB
+participant "StockLog" as LogDB
+
+== Khách hàng gửi yêu cầu trả hàng ==
+Customer -> UI : Chọn đơn đã giao, chọn sản phẩm\ncần trả, nhập lý do
+UI -> Ctrl : POST /api/returns
+
+Ctrl -> OrderDB : Kiểm tra status="delivered"\nvà trong 7 ngày kể từ deliveredAt
+OrderDB --> Ctrl : Hợp lệ
+
+Ctrl -> ReturnDB : Kiểm tra không có yêu cầu\ntrả hàng đang xử lý khác
+Ctrl -> Ctrl : Tính refundAmount theo\nsố lượng sản phẩm chọn trả
+
+Ctrl -> ReturnDB : Tạo ReturnRequest (status=pending)
+Ctrl -> OrderDB : Cập nhật Order.status =\n"return_requested"
+Ctrl -> UI : Xác nhận đã gửi yêu cầu
+
+== Quản trị viên xử lý ==
+Admin -> UI : Duyệt yêu cầu, chọn phương thức hoàn tiền
+UI -> AdminCtrl : PUT /api/admin/returns/:id
+
+AdminCtrl -> ReturnDB : Cập nhật status = "approved"
+
+AdminCtrl -> Ctrl : Tính điểm cần trừ\n= (refundAmount / totalPrice) * pointsEarned
+AdminCtrl -> UserDB : Trừ loyaltyPoints (theo tỉ lệ)\nTrừ totalSpent
+AdminCtrl -> UserDB : Tính lại memberTier\n(có thể bị hạ hạng)
+
+alt Hoàn tiền vào ví
+  AdminCtrl -> UserDB : Cộng walletBalance
+  AdminCtrl -> WalletDB : Ghi WalletTransaction (type=refund)
+else Hoàn tiền qua chuyển khoản
+  AdminCtrl -> AdminCtrl : Lưu refundRef, thông tin\nngân hàng nhận tiền
+end
+
+loop Mỗi sản phẩm được trả
+  AdminCtrl -> LogDB : Ghi StockLog (type=return)
+end
+
+AdminCtrl -> OrderDB : Cập nhật Order.status = "returned"
+AdminCtrl -> UI : Trả kết quả
+UI -> Admin : Hiển thị đã xử lý xong
+
+@enduml

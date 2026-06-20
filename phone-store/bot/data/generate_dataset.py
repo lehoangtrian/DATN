@@ -49,7 +49,8 @@ Hướng dẫn:
 QUY TẮC QUAN TRỌNG VỀ GIÁ VÀ SẢN PHẨM:
 - Khi có mục "Thông tin tra cứu thực tế" bên dưới, CHỈ dùng thông tin đó để trả lời về giá, tồn kho, màu sắc, thông số.
 - KHÔNG tự bịa giá hoặc thông tin sản phẩm từ kiến thức bên ngoài.
-- Nếu sản phẩm khách hỏi KHÔNG có trong danh sách tra cứu, hãy nói "PhoneStore hiện chưa có sản phẩm này" thay vì đưa ra giá sai."""
+- Nếu mục "Thông tin tra cứu thực tế" CÓ LIỆT KÊ sản phẩm (dòng bắt đầu bằng "-"), nghĩa là sản phẩm đó CÓ SẴN — BẮT BUỘC phải nêu tên và giá đúng từ danh sách đó. TUYỆT ĐỐI KHÔNG nói "chưa có" hoặc "không có" trong trường hợp này.
+- Chỉ nói "PhoneStore hiện chưa có sản phẩm này" khi mục tra cứu thực tế TRỐNG hoặc không liệt kê sản phẩm nào."""
 
 # Phải khớp 100% với khối context trong bot/llm.py chat()
 CONTEXT_HEADER = "===THÔNG TIN TRA CỨU THỰC TẾ TỪ HỆ THỐNG (ưu tiên hơn kiến thức của bạn)===\n"
@@ -415,6 +416,27 @@ def gen_return_product() -> list[dict]:
         "7 ngày tính từ lúc đặt hay lúc nhận?", "Quá 7 ngày thì làm gì?",
         "Có thể đổi sang sản phẩm đắt hơn hay rẻ hơn không?",
         "Trả hàng có ảnh hưởng tài khoản không?", "Lần trả thứ 2 có được không?",
+    ]
+    return [s(q, random.choice(ANSWERS)) for q in questions]
+
+
+def gen_cancel_order() -> list[dict]:
+    """Hỏi hủy đơn hàng — trước đó không có mẫu nào, câu hỏi rơi vào fallback (không trả
+    lời được). Khớp đúng điều kiện thật ở order.controller.js cancelOrder(): chỉ hủy được
+    khi đơn ở trạng thái 'pending'/'confirmed', hoàn tiền về ví nếu đã thanh toán qua ví."""
+    ANSWERS = [
+        "Bạn có thể tự hủy đơn khi đơn còn ở trạng thái \"Chờ xác nhận\" hoặc \"Đã xác nhận\" — vào trang Đơn hàng → chọn đơn → bấm Hủy đơn. Nếu đã thanh toán qua ví, tiền hoàn lại ngay. Đơn đang giao thì không tự hủy được, gọi 1800 6789 nhé!",
+        "Hủy đơn được nếu đơn chưa chuyển sang trạng thái giao hàng (còn ở 'Chờ xác nhận'/'Đã xác nhận'). Vào Đơn hàng → bấm Hủy. Tiền đã thanh toán qua ví sẽ hoàn lại ngay. Đơn đang/đã giao thì liên hệ hotline 1800 6789.",
+        "Có, miễn là đơn chưa được chuẩn bị/giao hàng. Bạn vào trang Đơn hàng của mình, chọn đơn cần hủy và bấm Hủy đơn. Thanh toán qua ví sẽ được hoàn lại tự động.",
+    ]
+    questions = [
+        "Tôi có thể hủy đơn được không?", "Hủy đơn hàng thế nào?",
+        "Làm sao để hủy đơn vừa đặt?", "Đặt nhầm rồi, hủy được không?",
+        "Hủy đơn có mất phí không?", "Hủy đơn rồi tiền có hoàn lại không?",
+        "Đơn đang giao có hủy được không?", "Tôi muốn hủy đơn hàng",
+        "Cancel đơn vừa mua được không?", "Đặt hàng xong đổi ý hủy được không?",
+        "Hủy đơn ở đâu trên web?", "Bao lâu thì không hủy đơn được nữa?",
+        "Hủy đơn thanh toán bằng ví thì sao?", "Hủy đơn COD có sao không?",
     ]
     return [s(q, random.choice(ANSWERS)) for q in questions]
 
@@ -910,6 +932,38 @@ def gen_check_wallet_context() -> list[dict]:
     return samples
 
 
+def gen_check_points_context() -> list[dict]:
+    """Hỏi điểm thưởng/hạng thành viên — kèm context giả lập giống dòng 'Điểm thưởng hiện
+    tại: X điểm. Hạng thành viên: Y.' trong main.py. Trước đó hoàn toàn không có mẫu nào
+    cho intent này (tính năng điểm thưởng build sau, chatbot chưa biết) — câu hỏi bị nhận
+    nhầm thành hỏi VÍ TIỀN (do từ khóa 'còn bao nhiêu' trùng với check_wallet) hoặc rơi vào
+    search vô nghĩa — đã verify bug này qua test thật."""
+    questions = [
+        "Điểm thưởng của tôi còn bao nhiêu?", "Tôi có bao nhiêu điểm tích lũy?",
+        "Mua hàng được tích bao nhiêu điểm?", "Hạng thành viên của tôi là gì?",
+        "Làm sao để lên hạng?", "Đổi điểm sang mã giảm giá thế nào?",
+        "Điểm thưởng dùng để làm gì?", "Hạng Gold được nhân mấy điểm?",
+        "Kiểm tra điểm tích lũy của tôi", "Tôi đang ở hạng nào?",
+    ]
+    samples = []
+    for points, tier in [(0, "bronze"), (320, "bronze"), (1500, "silver"), (8200, "gold"), (25000, "platinum")]:
+        context = f"Điểm thưởng hiện tại: {points} điểm. Hạng thành viên: {tier}."
+        tier_label = {"bronze": "Bronze", "silver": "Silver", "gold": "Gold", "platinum": "Platinum"}[tier]
+        multiplier = {"bronze": 1, "silver": 1.5, "gold": 2, "platinum": 3}[tier]
+        if points == 0:
+            answer = f"Bạn hiện chưa có điểm thưởng nào, đang ở hạng {tier_label}. Mua hàng và nhận giao thành công để bắt đầu tích điểm nhé!"
+        else:
+            answer = f"Bạn hiện có {points} điểm thưởng, hạng {tier_label} (x{multiplier} điểm mỗi đơn hàng). Bạn có thể đổi điểm sang mã giảm giá trong trang Tài khoản."
+        for q in random.sample(questions, k=4):
+            samples.append(s(q, answer, context=context))
+
+    # Chưa đăng nhập — không có context
+    for q in random.sample(questions, k=6):
+        samples.append(s(q, "Bạn cần đăng nhập để xem điểm thưởng ạ."))
+
+    return samples
+
+
 def gen_flash_sale_context() -> list[dict]:
     """Hỏi flash sale — kèm context giả lập giống _format_flash_sales()."""
     questions = [
@@ -1029,36 +1083,44 @@ def gen_product_advice(product_names: list[str]) -> list[dict]:
     return samples
 
 
-def gen_product_pair_comparison(product_names: list[str]) -> list[dict]:
-    """So sánh 2 sản phẩm cụ thể từ DB."""
-    COMPARE_ANS = [
-        "Cả hai đều là lựa chọn tốt! Tùy nhu cầu: bạn ưu tiên tính năng gì — camera, pin, hiệu năng hay giá? Mình tư vấn cụ thể hơn nhé.",
-        "Hai máy đều có ưu điểm riêng. Bạn có thể dùng tính năng So sánh trên website để xem chi tiết từng tiêu chí!",
-        "Mỗi máy có thế mạnh khác nhau tùy phân khúc. Bạn cho mình biết ngân sách và ưu tiên tính năng để mình tư vấn chính xác hơn!",
-        "Để so sánh chính xác, bạn vào mục So sánh sản phẩm trên website. Hoặc cho mình biết bạn cần gì để mình gợi ý nhé!",
-    ]
+def gen_product_pair_comparison(products_info: list[dict]) -> list[dict]:
+    """So sánh 2 sản phẩm cụ thể từ DB — PHẢI kèm context thật (tên+giá cả 2 máy). Nếu
+    không, model học thuộc câu trả lời chung chung kiểu "Cả hai đều là lựa chọn tốt..."
+    không dùng dữ liệu thật, dù main.py đã sửa để tìm đúng cả 2 sản phẩm riêng biệt khi hỏi
+    so sánh (_extract_compare_targets) — đã verify bug này qua test thật: hỏi so sánh 2 máy
+    cụ thể, bot không đưa ra số liệu nào, chỉ hỏi lại nhu cầu chung chung."""
+    products = [p for p in products_info if p.get("categoryType", "phone") == "phone" and p.get("name")]
     samples = []
-    names = [n for n in product_names if n and len(n) > 3]
     pairs_done = set()
-    for _ in range(min(60, len(names) * (len(names) - 1) // 2)):
-        if len(names) < 2:
+    for _ in range(min(60, len(products) * (len(products) - 1) // 2)):
+        if len(products) < 2:
             break
-        a, b = random.sample(names, 2)
-        key = tuple(sorted([a, b]))
+        a, b = random.sample(products, 2)
+        key = tuple(sorted([a["name"], b["name"]]))
         if key in pairs_done:
             continue
         pairs_done.add(key)
         q = random.choice([
-            f"{a} hay {b} tốt hơn?", f"Nên mua {a} hay {b}?",
-            f"So sánh {a} với {b} giúp mình", f"{a} vs {b} cái nào ngon hơn?",
-            f"Giữa {a} và {b} nên chọn cái nào?",
+            f"{a['name']} hay {b['name']} tốt hơn?", f"Nên mua {a['name']} hay {b['name']}?",
+            f"So sánh {a['name']} với {b['name']} giúp mình", f"{a['name']} vs {b['name']} cái nào ngon hơn?",
+            f"Giữa {a['name']} và {b['name']} nên chọn cái nào?",
         ])
-        samples.append(s(q, random.choice(COMPARE_ANS)))
+        context = format_products_context([a, b])
+        answer = (
+            f"{a['name']} ({fmt(a['price'])}) và {b['name']} ({fmt(b['price'])})"
+            " đều là lựa chọn tốt. Bạn xem thêm thông số chi tiết từng máy trên website để so sánh kỹ hơn nhé!"
+        )
+        samples.append(s(q, answer, context=context))
     return samples
 
 
 def gen_multi_turn_examples(product_names: list[str]) -> list[dict]:
-    """Một số mẫu multi-turn để bot học cách xử lý context follow-up."""
+    """Một số mẫu multi-turn để bot học cách xử lý context follow-up.
+    KHÔNG sinh mẫu "X hay Y tốt hơn?" ở đây — gen_product_pair_comparison() đã làm đúng
+    việc này với context thật + lọc chỉ điện thoại. Sinh lại pattern y hệt ở đây nhưng
+    KHÔNG context (như bản cũ) sẽ dạy model 2 hành vi mâu thuẫn cho cùng 1 câu hỏi, và còn
+    lẫn cả phụ kiện vào cặp so sánh (vd "AirPods Pro 2 hay OPPO Reno 11 Pro") — đã phát
+    hiện qua kiểm tra dataset trước khi fine-tune."""
     samples = []
     for name in random.sample(product_names[:30], min(10, len(product_names))):
         samples.append(s(
@@ -1069,16 +1131,6 @@ def gen_multi_turn_examples(product_names: list[str]) -> list[dict]:
             f"Mình muốn mua {name} làm quà tặng",
             f"Chọn {name} làm quà rất ý nghĩa! Bạn muốn mua màu gì và cần hỗ trợ gì thêm — gói quà, khắc tên, hay card chúc mừng không?",
         ))
-
-    if len(product_names) >= 2:
-        for _ in range(10):
-            a, b = random.sample(product_names[:20], 2)
-            samples.append(s(
-                f"{a} hay {b} tốt hơn?",
-                f"Cả hai đều là lựa chọn tốt! {a} và {b} có điểm mạnh khác nhau tùy nhu cầu. "
-                f"Bạn có thể dùng tính năng So sánh trên website để xem chi tiết. "
-                f"Bạn cần ưu tiên camera, pin hay hiệu năng?",
-            ))
 
     return samples
 
@@ -1115,6 +1167,7 @@ def main():
         ("category_accessory", gen_category_accessory_samples(products_info)),
         ("check_order",      gen_check_order_context()),
         ("check_wallet",     gen_check_wallet_context()),
+        ("check_points",     gen_check_points_context()),
         ("flash_sale",       gen_flash_sale_context()),
         ("greeting",         gen_greeting()),
         ("goodbye",          gen_goodbye()),
@@ -1123,13 +1176,14 @@ def main():
         ("faq_payment",      gen_faq_payment()),
         ("contact_info",     gen_contact_info()),
         ("return_product",   gen_return_product()),
+        ("cancel_order",      gen_cancel_order()),
         ("validate_coupon",  gen_validate_coupon()),
         ("coupon_list",      gen_coupon_list()),
         ("new_arrivals",     gen_new_arrivals(products_info)),
         ("bestsellers",      gen_bestsellers(products_info)),
         ("recommend",        gen_recommend()),
         ("product_advice",   gen_product_advice(product_names)),
-        ("product_compare",  gen_product_pair_comparison(product_names)),
+        ("product_compare",  gen_product_pair_comparison(products_info)),
         ("multi_turn",       gen_multi_turn_examples(product_names)),
         ("fallback",         gen_fallback()),
     ]

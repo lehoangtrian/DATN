@@ -1,0 +1,31 @@
+@startuml
+title Sequence Diagram - Đổi điểm thưởng sang mã giảm giá
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+skinparam maxMessageSize 160
+
+actor "Khách hàng" as Customer
+participant "Client" as UI
+participant "LoyaltyController" as Ctrl
+participant "User" as UserDB
+participant "Coupon" as CouponDB
+
+Customer -> UI : Nhập số điểm muốn đổi (>= 50)
+UI -> Ctrl : POST /api/loyalty/redeem { points }
+
+Ctrl -> UserDB : Trừ loyaltyPoints (atomic,\nchỉ thành công nếu đủ điểm)
+UserDB --> Ctrl : Thành công / Không đủ điểm
+
+alt Không đủ điểm
+  Ctrl -> UI : Lỗi "Không đủ điểm"
+  UI -> Customer : Hiển thị thông báo lỗi
+else Đủ điểm
+  Ctrl -> Ctrl : Sinh mã coupon ngẫu nhiên\n(vd "PT" + id rút gọn + hex)
+  Ctrl -> CouponDB : Tạo Coupon\n(type=fixed, value=points*1000,\nallowedUserId=khách này,\nusageLimit=1, hết hạn sau 30 ngày)
+  CouponDB --> Ctrl : Tạo thành công
+  Ctrl -> UI : Trả mã coupon + điểm còn lại
+  UI -> Customer : Hiển thị mã giảm giá mới
+end
+
+@enduml

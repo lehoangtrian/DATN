@@ -1,0 +1,147 @@
+@startuml
+title Class Diagram - Tổng quan toàn hệ thống
+skinparam linetype ortho
+skinparam monochrome true
+skinparam shadowing false
+skinparam classFontSize 12
+skinparam classAttributeFontSize 11
+hide circle
+hide methods
+
+class User {
+  +name, email, phone
+  +role: user|admin|staff
+  +memberTier: bronze..platinum
+  +loyaltyPoints
+  +walletBalance
+  +addresses[]
+}
+class Brand {
+  +name, slug
+  +type: phone|accessory
+}
+class Category {
+  +name_vi, slug
+  +type: phone|accessory
+  +parentId
+}
+class Product {
+  +name, slug
+  +specs, rating, sold
+  +status, badge
+}
+class ProductVariant {
+  +color, storage
+  +price, salePrice
+  +stock
+}
+class Cart {
+  +items[]
+  +couponCode
+}
+class Order {
+  +orderCode
+  +items[]
+  +status
+  +paymentMethod
+  +pointsUsed, pointsEarned
+}
+class Review {
+  +rating, comment
+  +isApproved
+}
+class Wishlist
+class FlashSale {
+  +type: variant|category
+  +salePrice / discountValue
+  +quantity, sold, limitPerUser
+}
+class Coupon {
+  +code, type, value
+  +usageLimit, usedCount
+  +allowedUserId
+}
+class ReturnRequest {
+  +reason, status
+  +refundAmount, refundMethod
+}
+class Payment {
+  +method, amount, status
+}
+class WalletTransaction {
+  +type, amount
+  +balanceAfter
+}
+class TopupRequest {
+  +amount, status
+}
+class WithdrawalRequest {
+  +amount, bankName, status
+}
+class StockLog {
+  +type, quantity
+  +stockBefore, stockAfter
+}
+class ChatSession {
+  +status: bot|open|closed
+}
+class ChatMessage {
+  +sender, text
+  +actions[]
+}
+class Notification {
+  +title, content, type
+  +isRead
+}
+class OTP {
+  +code, type
+  +expiresAt
+}
+class Banner {
+  +title, link, imageUrl
+}
+class ServiceBadge {
+  +title, iconName
+}
+
+User "1" -- "0..*" Order
+User "1" -- "1" Cart
+User "1" -- "0..*" Review
+User "1" -- "0..*" Wishlist
+User "1" -- "0..*" ReturnRequest
+User "1" -- "0..*" WalletTransaction
+User "1" -- "0..*" TopupRequest
+User "1" -- "0..*" WithdrawalRequest
+User "1" -- "0..*" Notification
+User "1" -- "0..*" ChatSession
+User "0..1" -- "0..*" OTP
+
+Brand "1" -- "0..*" Product
+Category "1" -- "0..*" Product
+Category "0..1" -- "0..*" Category : parentId
+
+Product "1" -- "0..*" ProductVariant
+Product "1" -- "0..*" Review
+Product "1" -- "0..*" Wishlist
+ProductVariant "1" -- "0..*" StockLog
+
+Cart "1" -- "0..*" ProductVariant : items
+Order "1" -- "0..*" ProductVariant : items
+Order "0..*" -- "0..1" FlashSale : flashSaleId
+Order "1" -- "0..*" Payment
+Order "1" -- "0..1" ReturnRequest
+Order "1" -- "0..*" StockLog
+Order "0..1" -- "0..*" WalletTransaction
+
+FlashSale "0..1" -- "0..1" ProductVariant
+FlashSale "0..1" -- "0..1" Category
+
+Coupon "0..*" -- "0..1" User : allowedUserId
+Coupon "0..*" -- "0..*" Brand : applicableBrands
+Coupon "0..*" -- "0..*" Category : applicableCategories
+
+ReturnRequest "1" -- "0..*" Product
+
+ChatSession "1" -- "0..*" ChatMessage
+
+@enduml

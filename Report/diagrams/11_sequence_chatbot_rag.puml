@@ -1,0 +1,42 @@
+@startuml
+title Sequence Diagram - Chatbot AI trả lời câu hỏi khách hàng (RAG)
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+skinparam maxMessageSize 160
+
+actor "Khách hàng" as Customer
+participant "Client\n(Socket.IO)" as UI
+participant "Node.js API\n(chat.controller)" as Node
+participant "Python Bot\n(main.py)" as Bot
+participant "Bộ nhận diện ý định\n(intent.py)" as Intent
+participant "Node API\n(dữ liệu thật)" as DataAPI
+participant "Ollama LLM" as LLM
+
+Customer -> UI : Gửi câu hỏi\n(vd: "iPhone 15 còn màu đen không")
+UI -> Node : Socket "chat:send"
+Node -> Bot : POST /chat { text, user_token }
+
+Bot -> Intent : Phân tích câu hỏi
+Intent --> Bot : Ý định = "tìm sản phẩm"\n+ từ khóa trích xuất ("iPhone 15")
+
+Bot -> DataAPI : GET /api/products/search?q=iPhone 15
+DataAPI --> Bot : Dữ liệu thật\n(giá, tồn kho, màu sắc từng phiên bản)
+
+Bot -> Bot : Ghép dữ liệu thật vào\nphần "ngữ cảnh tra cứu"\ncủa system prompt
+
+Bot -> LLM : Gửi system prompt + ngữ cảnh\n+ lịch sử hội thoại
+LLM --> Bot : Câu trả lời tự nhiên\n(dựa trên dữ liệu thật, không bịa)
+
+Bot --> Node : Trả về { text, actions, intent }
+Node -> UI : Socket trả kết quả
+UI -> Customer : Hiển thị câu trả lời\n+ nút điều hướng (nếu có)
+
+note over Bot, LLM
+  Nguyên tắc: LLM CHỈ được dùng dữ liệu
+  trong phần "ngữ cảnh tra cứu" để trả lời
+  giá / tồn kho / màu sắc — không tự suy
+  diễn từ kiến thức huấn luyện trước đó.
+end note
+
+@enduml

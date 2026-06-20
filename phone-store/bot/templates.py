@@ -3,7 +3,7 @@
 from actions import (
     get_orders, search_products, get_product_detail,
     get_products_filtered, get_wallet, validate_coupon, get_flash_sales,
-    get_active_coupons,
+    get_active_coupons, get_profile,
 )
 from intent import filter_exact_match
 
@@ -416,6 +416,46 @@ async def handle_check_wallet(token: str | None) -> dict:
     }
 
 
+# Khớp đúng admin.controller.js TIER_POINT_MULTIPLIER / client ProfilePage.jsx TIER_INFO —
+# không có constants file chung nên hardcode lại ở đây, phải sửa đồng bộ nếu đổi mốc.
+_TIER_LABEL = {"bronze": "Bronze", "silver": "Silver", "gold": "Gold", "platinum": "Platinum"}
+_TIER_MULTIPLIER = {"bronze": 1, "silver": 1.5, "gold": 2, "platinum": 3}
+
+
+async def handle_check_points(token: str | None) -> dict:
+    """Điểm thưởng/hạng thành viên — trước đó hoàn toàn không có route nào, câu hỏi bị
+    nhận nhầm thành hỏi số dư ví (check_wallet, do từ khóa 'còn bao nhiêu' trùng) hoặc rơi
+    vào search vô nghĩa. Không có endpoint riêng cho điểm — dùng chung GET /api/profile."""
+    if not token:
+        return {
+            "text": "Bạn cần đăng nhập để xem điểm thưởng ạ.",
+            "actions": [{"label": "Đăng nhập", "type": "navigate", "payload": "/login"}],
+        }
+
+    data = await get_profile(token)
+    if not data or not data.get("success"):
+        return {
+            "text": "Không thể tải thông tin điểm thưởng lúc này. Vui lòng thử lại sau.",
+            "actions": [{"label": "Xem tài khoản", "type": "navigate", "payload": "/profile"}],
+        }
+
+    profile = data.get("data", {})
+    points = int(profile.get("loyaltyPoints", 0) or 0)
+    tier = profile.get("memberTier", "bronze")
+    tier_label = _TIER_LABEL.get(tier, "Bronze")
+    multiplier = _TIER_MULTIPLIER.get(tier, 1)
+    return {
+        "text": (
+            f"Bạn hiện có {points:,}".replace(",", ".") + f" điểm thưởng, hạng {tier_label} "
+            f"(x{multiplier} điểm mỗi đơn hàng).\n"
+            "Bạn có thể đổi điểm sang mã giảm giá trong trang Tài khoản."
+        ),
+        "actions": [
+            {"label": "Đổi điểm lấy mã giảm giá", "type": "navigate", "payload": "/profile"},
+        ],
+    }
+
+
 # ── Coupon ────────────────────────────────────────────────────────────────────
 
 async def handle_validate_coupon(coupon_code: str | None, token: str | None) -> dict:
@@ -582,6 +622,26 @@ def handle_return_product() -> dict:
         "actions": [
             {"label": "Xem đơn hàng", "type": "navigate", "payload": "/orders"},
             {"label": "Chính sách đầy đủ", "type": "navigate", "payload": "/policy"},
+        ],
+    }
+
+
+# ── Cancel order ─────────────────────────────────────────────────────────────
+
+def handle_cancel_order() -> dict:
+    """Chính sách hủy đơn — khớp đúng điều kiện thật ở order.controller.js cancelOrder():
+    chỉ hủy được khi đơn đang ở trạng thái 'pending' hoặc 'confirmed', hoàn tiền về ví nếu
+    đã thanh toán qua ví. Trước đó câu hỏi này rơi vào fallback (không trả lời được gì)."""
+    return {
+        "text": (
+            "Bạn có thể tự hủy đơn khi đơn đang ở trạng thái \"Chờ xác nhận\" hoặc \"Đã xác nhận\" "
+            "(chưa chuyển sang chuẩn bị/giao hàng).\n"
+            "• Vào trang Đơn hàng → chọn đơn cần hủy → bấm Hủy đơn\n"
+            "• Nếu đã thanh toán qua ví PhoneStore, tiền sẽ hoàn lại ví ngay sau khi hủy\n"
+            "• Đơn đang giao hoặc đã giao thì không tự hủy được — vui lòng liên hệ hotline 1800 6789 để được hỗ trợ"
+        ),
+        "actions": [
+            {"label": "Xem đơn hàng", "type": "navigate", "payload": "/orders"},
         ],
     }
 

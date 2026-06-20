@@ -1,0 +1,40 @@
+@startuml
+title Sequence Diagram - Giao hàng thành công và tích điểm thưởng
+skinparam linetype polyline
+skinparam monochrome true
+skinparam shadowing false
+skinparam maxMessageSize 160
+
+actor "Quản trị viên" as Admin
+participant "Admin Dashboard\n(React Client)" as UI
+participant "AdminController" as Ctrl
+participant "Order" as OrderDB
+participant "User" as UserDB
+participant "Notification" as NotiDB
+
+Admin -> UI : Cập nhật trạng thái đơn = "delivered"
+UI -> Ctrl : PUT /api/admin/orders/:id/status
+
+Ctrl -> OrderDB : Lấy thông tin đơn hàng
+OrderDB --> Ctrl : Order (totalPrice, userId)
+
+Ctrl -> UserDB : Lấy memberTier hiện tại của khách
+UserDB --> Ctrl : memberTier
+
+Ctrl -> Ctrl : Tính pointsEarned =\nfloor(totalPrice / 1000) * hệ số hạng\n(bronze=1, silver=1.1, gold=1.2, platinum=1.5)
+
+Ctrl -> OrderDB : Lưu snapshot pointsEarned\nvà deliveredAt vào Order
+
+Ctrl -> UserDB : Cộng loyaltyPoints (atomic)\nCộng totalSpent (atomic)
+
+Ctrl -> Ctrl : Đối chiếu totalSpent với\nngưỡng hạng (5tr/20tr/50tr)
+
+alt totalSpent vượt ngưỡng hạng cao hơn
+  Ctrl -> UserDB : Nâng memberTier
+end
+
+Ctrl -> NotiDB : Tạo thông báo\n"Đơn hàng đã giao thành công"
+Ctrl -> UI : Trả kết quả cập nhật
+UI -> Admin : Hiển thị trạng thái mới
+
+@enduml
