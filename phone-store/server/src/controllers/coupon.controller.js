@@ -101,6 +101,12 @@ const getActiveCoupons = async (req, res, next) => {
             ['bronze', 'silver', 'gold', 'platinum'].indexOf(req.user?.memberTier || 'bronze') + 1
           )).map((t) => ({ userType: t })),
         ] },
+        // Coupon cá nhân (allowedUserId, vd đổi từ điểm/sinh nhật) chỉ hiện cho đúng
+        // chủ sở hữu — không lộ code/mô tả của người khác trong danh sách public.
+        { $or: [
+          { allowedUserId: null },
+          { allowedUserId: req.user?._id || null },
+        ] },
       ],
     })
       .select('code type value description minOrderValue maxDiscountAmount endDate userType')

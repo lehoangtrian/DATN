@@ -69,17 +69,25 @@ INTENTS = {
         "weight": 1.3,
         "threshold": 0.06,
     },
+    "new_arrivals": {
+        "keywords": [
+            "mới ra mắt", "vừa ra mắt", "mới về", "hàng mới",
+            "mới nhất", "sản phẩm mới", "máy mới", "model mới",
+        ],
+        "weight": 1.3,
+        "threshold": 0.1,
+    },
     "recommend_product": {
         "keywords": [
             "tư vấn", "nên mua", "loại nào tốt", "máy nào tốt",
             "điện thoại nào tốt", "gợi ý", "đề xuất", "giới thiệu",
-            "bán chạy", "phổ biến", "hot", "nổi bật",
+            "bán chạy", "phổ biến", "hot", "nổi bật", "best seller", "bestseller",
             "nên chọn", "phù hợp", "sản phẩm tốt", "tư vấn giúp",
             "mua máy gì", "chọn máy gì",
             "tầm giá", "tầm tiền", "ngân sách", "khoảng bao nhiêu", "tầm",
         ],
         "weight": 1.2,
-        "threshold": 0.05,
+        "threshold": 0.04,
     },
     "goodbye": {
         "keywords": [
@@ -189,6 +197,33 @@ BRAND_NAME_MAP = {
     "tecno": "tecno",
 }
 
+# Từ khóa danh mục phụ kiện (tiếng Việt, đã normalize) → category slug thật trên server.
+# Sản phẩm phụ kiện đặt tên thương hiệu tiếng Anh (vd "Anker Soundcore Q20i") nên tìm theo
+# tên sẽ không khớp khi user hỏi bằng từ danh mục chung ("tai nghe", "ốp lưng"...) — phải tra
+# qua category slug rồi gọi API filter theo category thay vì search theo tên.
+CATEGORY_KEYWORDS = [
+    ("tai nghe", "tai-nghe"),
+    ("sac khong day", "sac-khong-day"),
+    ("sac nhanh", "sac-nhanh"),
+    # Không map "sạc dự phòng" (power bank) → "sac-nhanh": đây là 2 loại sản phẩm
+    # khác nhau (pin dự phòng vs sạc/cáp adapter) và PhoneStore không bán pin dự
+    # phòng — map nhầm sẽ khiến bot gợi ý sai sản phẩm. Để câu hỏi này rơi vào
+    # nhánh "không tìm thấy" (trung thực) thay vì trả lời nhầm.
+    ("op lung", "op-lung"),
+    ("bao da", "op-lung"),
+    ("cap sac", "cap-sac"),
+    ("day sac", "cap-sac"),
+]
+
+
+def _extract_category(text: str) -> str | None:
+    """Trả về category slug nếu câu hỏi chứa từ khóa danh mục phụ kiện đã biết."""
+    norm = _normalize(text)
+    for keyword, slug in CATEGORY_KEYWORDS:
+        if keyword in norm:
+            return slug
+    return None
+
 
 def _extract_coupon_code(text: str) -> str | None:
     for trigger in ['mã', 'ma', 'code', 'voucher', 'coupon']:
@@ -236,13 +271,37 @@ def _extract_brand(text: str) -> str | None:
     return None
 
 
+def filter_exact_match(products: list[dict], query: str) -> list[dict]:
+    """Nếu query khớp CHÍNH XÁC tên 1 sản phẩm (so sánh đã bỏ dấu, lowercase), chỉ giữ
+    sản phẩm đó. /products/search dùng substring match nên hỏi đích danh 1 model (vd
+    "iphone 15 pro") vẫn kéo theo các sản phẩm có tên chứa cụm đó như tiền tố (vd "iPhone
+    15 Pro Max") — đã verify bug này qua test thật (bot trả lời kèm cả model không hỏi tới).
+    Không sửa thẳng trong /products/search vì endpoint đó dùng chung cho thanh tìm kiếm
+    website (cần substring/gợi ý mở rộng), chỉ áp dụng độ chính xác này riêng cho chatbot."""
+    qn = _normalize(query.strip())
+    exact = [p for p in products if _normalize(p.get("name", "")) == qn]
+    return exact if exact else products
+
+
 # Noise patterns (normalized form) to strip from end of extracted query
 _NOISE_SUFFIX = re.compile(
     r'\s+(bao nhieu|gia bao nhieu|co khong|ban khong|con hang khong|het hang khong'
     r'|khong|nao|gi|co|duoc|ban|o dau|nhu the nao|thi sao|gia|nhat'
     r'|con hang|het hang|mau gi|mau nao|con mau|con khong|gia bao'
-    r'|specs|thong so|chi tiet|mua duoc khong|mua duoc)\s*$'
+    r'|specs|thong so|chi tiet|mua duoc khong|mua duoc'
+    r'|vay|nhe|nha|the|di|thoi|a|ha)\s*$'
 )
+
+
+def _strip_noise_suffix(s: str) -> str:
+    """Áp dụng _NOISE_SUFFIX lặp lại đến khi ổn định — vì câu có thể có nhiều
+    noise word liên tiếp ở cuối (vd "co ban khong" → xóa "ban khong" còn lại "co",
+    phải xóa tiếp "co")."""
+    prev = None
+    while prev != s:
+        prev = s
+        s = _NOISE_SUFFIX.sub('', s).strip()
+    return s
 
 _SEARCH_STOPWORDS_NORM = [_normalize(sw) for sw in [
     "tìm kiếm", "có bán", "bán không", "cho tôi xem", "cho tôi", "tôi muốn",
@@ -265,8 +324,13 @@ def _extract_search_query(text: str) -> str:
             idx = norm.find(brand)
             raw_slice = text[idx:idx + 40].strip()
             # Xóa trailing noise bằng normalized version của slice
+            # Phải xóa dấu câu cuối câu (?, !, ...) TRƯỚC khi match _NOISE_SUFFIX,
+            # vì regex đó yêu cầu noise phrase nằm sát cuối chuỗi (\s*$) — câu hỏi
+            # thực tế hầu như luôn kết thúc bằng "?" nên nếu không xóa trước, noise
+            # suffix (vd "giá bao nhiêu") sẽ không bị nhận diện và không bị xóa.
             norm_slice = _normalize(raw_slice)
-            norm_clean = _NOISE_SUFFIX.sub('', norm_slice).strip()
+            norm_slice = re.sub(r'[?!.,;:]+\s*$', '', norm_slice).strip()
+            norm_clean = _strip_noise_suffix(norm_slice)
             norm_clean = re.sub(r'[?!.,;:]+$', '', norm_clean).strip()
             if not norm_clean:
                 return brand
@@ -278,10 +342,11 @@ def _extract_search_query(text: str) -> str:
 
     # Generic: xóa stopwords khỏi normalized, lấy phần còn lại
     q_norm = norm
+    q_norm = re.sub(r'[?!.,;:]+\s*$', '', q_norm).strip()
     for sw in sorted(_SEARCH_STOPWORDS_NORM, key=len, reverse=True):
         q_norm = re.sub(rf'(?<!\w){re.escape(sw)}(?!\w)', ' ', q_norm)
     q_norm = re.sub(r'\s+', ' ', q_norm).strip()
-    q_norm = _NOISE_SUFFIX.sub('', q_norm).strip()
+    q_norm = _strip_noise_suffix(q_norm)
     q_norm = re.sub(r'[?!.,;:]+$', '', q_norm).strip()
     return q_norm if len(q_norm) > 2 else ""
 

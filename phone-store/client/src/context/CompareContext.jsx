@@ -17,9 +17,12 @@ export function CompareProvider({ children }) {
   const remove = (id) => setList((prev) => prev.filter((p) => p._id !== id));
   const clear   = () => setList([]);
   const has     = (id) => list.some((p) => p._id === id);
+  // Đặt thẳng danh sách so sánh theo id — dùng khi deep-link từ ngoài vào (vd
+  // bot chat trỏ tới /compare?ids=...) thay vì người dùng tự bấm từng sản phẩm.
+  const replace = (ids) => setList(ids.slice(0, 3).map((id) => ({ _id: id })));
 
   return (
-    <CompareContext.Provider value={{ list, toggle, remove, clear, has }}>
+    <CompareContext.Provider value={{ list, toggle, remove, clear, has, replace }}>
       {children}
     </CompareContext.Provider>
   );

@@ -3,28 +3,12 @@ const { success, error } = require('../utils/response.utils');
 
 const HOLD_DURATION_MS = 15 * 60 * 1000; // 15 phút
 
-// Tính stock thực tế = stock - tổng holdQuantity chưa hết hạn từ cart khác
-const getAvailableStock = async (variantId, excludeUserId = null) => {
+// "Giữ hàng" (holdStock) trừ THẬT vào ProductVariant.stock (atomic) ngay khi giữ —
+// không còn là khóa ảo tính qua tổng holdQuantity. Vì vậy variant.stock luôn phản
+// ánh đúng số lượng còn thực sự khả dụng cho người khác, không cần trừ thêm gì nữa.
+const getAvailableStock = async (variantId) => {
   const variant = await ProductVariant.findById(variantId).lean();
-  if (!variant) return 0;
-
-  const now = new Date();
-  const heldCarts = await Cart.find({
-    'items.variantId': variantId,
-    'items.holdExpiry': { $gt: now },
-    ...(excludeUserId ? { userId: { $ne: excludeUserId } } : {}),
-  }).lean();
-
-  let totalHeld = 0;
-  heldCarts.forEach((cart) => {
-    cart.items.forEach((item) => {
-      if (item.variantId.toString() === variantId.toString() && item.holdExpiry > now) {
-        totalHeld += item.quantity;
-      }
-    });
-  });
-
-  return variant.stock - totalHeld;
+  return variant ? variant.stock : 0;
 };
 
 // GET /api/cart
@@ -50,6 +34,18 @@ const getCart = async (req, res, next) => {
   }
 };
 
+const isActivelyHeld = (item) => item.holdExpiry && new Date(item.holdExpiry) > new Date();
+
+// Hoàn lại stock thật cho các item đang giữ hàng còn hiệu lực (chưa hết hạn) trước khi
+// xóa/sửa khỏi giỏ — vì stock đã bị trừ thật lúc hold, nếu không hoàn sẽ "mất" hàng vĩnh viễn.
+const restoreHeldStock = async (items) => {
+  const held = items.filter(isActivelyHeld);
+  if (!held.length) return;
+  await Promise.allSettled(
+    held.map((i) => ProductVariant.findByIdAndUpdate(i.variantId, { $inc: { stock: i.quantity } }))
+  );
+};
+
 // POST /api/cart/items
 const addItem = async (req, res, next) => {
   try {
@@ -59,19 +55,23 @@ const addItem = async (req, res, next) => {
     if (!variant || !variant.isActive) return error(res, 'Sản phẩm không tồn tại', 404);
     if (variant.productId?.status === 'discontinued') return error(res, 'Sản phẩm đã ngừng kinh doanh', 400);
 
-    const available = await getAvailableStock(variantId, req.user._id);
-    if (available < quantity) return error(res, 'Không đủ hàng trong kho', 400);
-
     let cart = await Cart.findOne({ userId: req.user._id });
     if (!cart) cart = new Cart({ userId: req.user._id, items: [] });
 
     const existingIdx = cart.items.findIndex((i) => i.variantId.toString() === variantId);
     if (existingIdx >= 0) {
-      const newQty = cart.items[existingIdx].quantity + quantity;
+      const existing = cart.items[existingIdx];
+      if (isActivelyHeld(existing)) {
+        return error(res, 'Sản phẩm đang được giữ để thanh toán, vui lòng hoàn tất hoặc hủy thanh toán trước khi sửa giỏ hàng', 400);
+      }
+      const available = await getAvailableStock(variantId);
+      const newQty = existing.quantity + quantity;
       if (newQty > available) return error(res, `Chỉ còn ${available} sản phẩm trong kho`, 400);
-      cart.items[existingIdx].quantity = newQty;
-      cart.items[existingIdx].price = variant.salePrice || variant.price;
+      existing.quantity = newQty;
+      existing.price = variant.salePrice || variant.price;
     } else {
+      const available = await getAvailableStock(variantId);
+      if (available < quantity) return error(res, 'Không đủ hàng trong kho', 400);
       cart.items.push({
         variantId,
         productId: variant.productId._id,
@@ -96,15 +96,18 @@ const updateItem = async (req, res, next) => {
     const cart = await Cart.findOne({ userId: req.user._id });
     if (!cart) return error(res, 'Giỏ hàng trống', 404);
 
+    const item = cart.items.find((i) => i.variantId.toString() === variantId);
+    if (!item) return error(res, 'Sản phẩm không có trong giỏ', 404);
+    if (isActivelyHeld(item)) {
+      return error(res, 'Sản phẩm đang được giữ để thanh toán, vui lòng hoàn tất hoặc hủy thanh toán trước khi sửa giỏ hàng', 400);
+    }
+
     if (quantity === 0) {
       cart.items = cart.items.filter((i) => i.variantId.toString() !== variantId);
     } else {
       if (quantity < 1) return error(res, 'Số lượng không hợp lệ', 400);
-      const available = await getAvailableStock(variantId, req.user._id);
+      const available = await getAvailableStock(variantId);
       if (quantity > available) return error(res, `Chỉ còn ${available} sản phẩm`, 400);
-
-      const item = cart.items.find((i) => i.variantId.toString() === variantId);
-      if (!item) return error(res, 'Sản phẩm không có trong giỏ', 404);
       item.quantity = quantity;
     }
 
@@ -121,6 +124,9 @@ const removeItem = async (req, res, next) => {
     const cart = await Cart.findOne({ userId: req.user._id });
     if (!cart) return error(res, 'Giỏ hàng trống', 404);
 
+    const target = cart.items.find((i) => i.variantId.toString() === req.params.variantId);
+    if (target) await restoreHeldStock([target]);
+
     cart.items = cart.items.filter((i) => i.variantId.toString() !== req.params.variantId);
     await cart.save();
     return success(res, {}, 'Đã xóa sản phẩm khỏi giỏ');
@@ -132,6 +138,9 @@ const removeItem = async (req, res, next) => {
 // DELETE /api/cart
 const clearCart = async (req, res, next) => {
   try {
+    const cart = await Cart.findOne({ userId: req.user._id });
+    if (cart?.items?.length) await restoreHeldStock(cart.items);
+
     await Cart.findOneAndUpdate({ userId: req.user._id }, { items: [], couponCode: null, discountAmount: 0 });
     return success(res, {}, 'Đã xóa giỏ hàng');
   } catch (err) {
@@ -154,32 +163,44 @@ const holdStock = async (req, res, next) => {
     if (!itemsToHold.length) return error(res, 'Không có sản phẩm nào được chọn', 400);
 
     const holdExpiry = new Date(Date.now() + HOLD_DURATION_MS);
-    const failures = [];
 
-    // Kiểm tra stock trước khi hold
-    for (const item of itemsToHold) {
-      const available = await getAvailableStock(item.variantId.toString(), req.user._id);
-      if (available < item.quantity) {
-        const variant = await ProductVariant.findById(item.variantId)
-          .populate('productId', 'name').lean();
-        failures.push({
-          variantId: item.variantId,
-          name: variant?.productId?.name,
-          available,
-          requested: item.quantity,
+    // Bỏ qua item đã đang giữ hàng còn hiệu lực — tránh trừ kho 2 lần nếu user gọi
+    // /cart/hold nhiều lần (vd refresh trang, retry sau lỗi mạng) cho cùng 1 item.
+    const needHold = itemsToHold.filter((i) => !isActivelyHeld(i));
+
+    // Trừ THẬT vào kho — atomic per-item, có rollback nếu giữa đường thiếu hàng.
+    // Đây là điểm mấu chốt chống race condition: 2 request /cart/hold cùng lúc cho
+    // cùng 1 sản phẩm sẽ không thể cùng "pass" vì $gte là điều kiện atomic ở tầng DB,
+    // không phải kiểm tra rồi mới ghi (check-then-act) như cách cũ.
+    const reservations = [];
+    for (const item of needHold) {
+      const updated = await ProductVariant.findOneAndUpdate(
+        { _id: item.variantId, stock: { $gte: item.quantity } },
+        { $inc: { stock: -item.quantity } },
+        { new: true }
+      );
+      if (!updated) {
+        // Rollback các item đã trừ thành công trong batch này trước khi báo lỗi
+        await Promise.allSettled(
+          reservations.map((r) => ProductVariant.findByIdAndUpdate(r.variantId, { $inc: { stock: r.quantity } }))
+        );
+        const variant = await ProductVariant.findById(item.variantId).populate('productId', 'name').lean();
+        const fresh = await ProductVariant.findById(item.variantId).select('stock').lean();
+        return res.status(400).json({
+          success: false,
+          message: 'Một số sản phẩm không đủ hàng',
+          failures: [{
+            variantId: item.variantId,
+            name: variant?.productId?.name,
+            available: fresh?.stock ?? 0,
+            requested: item.quantity,
+          }],
         });
       }
+      reservations.push({ variantId: item.variantId, quantity: item.quantity });
     }
 
-    if (failures.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Một số sản phẩm không đủ hàng',
-        failures,
-      });
-    }
-
-    // Chỉ đặt holdExpiry cho các items được chọn
+    // Đặt/refresh holdExpiry cho toàn bộ items được chọn (gồm cả item đã hold từ trước)
     const holdSet = new Set(itemsToHold.map((i) => i.variantId.toString()));
     cart.items.forEach((item) => {
       if (holdSet.has(item.variantId.toString())) {
@@ -194,9 +215,13 @@ const holdStock = async (req, res, next) => {
   }
 };
 
-// POST /api/cart/release — giải phóng hold sớm (hủy checkout)
+// POST /api/cart/release — giải phóng hold sớm (hủy checkout) — phải hoàn lại đúng
+// số lượng đã trừ thật lúc hold, không chỉ unset cờ holdExpiry như trước.
 const releaseHold = async (req, res, next) => {
   try {
+    const cart = await Cart.findOne({ userId: req.user._id });
+    if (cart?.items?.length) await restoreHeldStock(cart.items);
+
     await Cart.findOneAndUpdate(
       { userId: req.user._id },
       { $unset: { 'items.$[].holdExpiry': '' } }

@@ -1,9 +1,11 @@
 """Vietnamese response builder — one handler per intent."""
 
 from actions import (
-    get_orders, search_products, get_featured_products, get_product_detail,
+    get_orders, search_products, get_product_detail,
     get_products_filtered, get_wallet, validate_coupon, get_flash_sales,
+    get_active_coupons,
 )
+from intent import filter_exact_match
 
 _BRANDS = ["iphone", "samsung", "xiaomi", "oppo", "vivo", "realme", "pixel", "oneplus", "nokia", "motorola"]
 
@@ -134,6 +136,7 @@ async def handle_search_product(query: str) -> dict:
 
     data = await search_products(query.strip())
     products = (data.get("products") or data.get("data") or []) if data else []
+    products = filter_exact_match(products, query)
 
     if not products:
         return {
@@ -197,6 +200,7 @@ async def handle_product_detail(query: str) -> dict:
 
     data = await search_products(query.strip(), limit=3)
     products = (data.get("products") or data.get("data") or []) if data else []
+    products = filter_exact_match(products, query)
 
     if not products:
         return {
@@ -254,7 +258,9 @@ async def handle_price_range(
     brand: str | None = None,
 ) -> dict:
     """Tìm sản phẩm theo khoảng giá thực tế từ server."""
-    data = await get_products_filtered(brand=brand, min_price=min_price, max_price=max_price, limit=6)
+    data = await get_products_filtered(
+        brand=brand, product_type="phone", min_price=min_price, max_price=max_price, limit=6
+    )
     products = []
     if data:
         products = data.get("products") or data.get("data") or []
@@ -307,6 +313,30 @@ async def handle_price_range(
     return {"text": text, "actions": actions}
 
 
+async def handle_new_arrivals() -> dict:
+    """Sản phẩm mới ra mắt — sort=newest (createdAt desc) trên điện thoại."""
+    data = await get_products_filtered(product_type="phone", sort="newest", limit=4)
+    products = (data.get("products") or data.get("data") or []) if data else []
+
+    if not products:
+        return {
+            "text": "Hiện chưa có thông tin sản phẩm mới. Bạn xem toàn bộ sản phẩm trên website nhé!",
+            "actions": [{"label": "Xem tất cả sản phẩm", "type": "navigate", "payload": "/products"}],
+        }
+
+    lines = [f"• {p.get('name', '')} — {_fmt_price(_get_price(p))}" for p in products]
+    text = "Sản phẩm mới ra mắt tại PhoneStore:\n" + "\n".join(lines)
+
+    actions = []
+    for p in products[:3]:
+        slug = p.get("slug", "")
+        name = p.get("name", "Xem chi tiết")
+        if slug:
+            actions.append({"label": name[:25], "type": "navigate", "payload": f"/products/{slug}"})
+    actions.append({"label": "Xem tất cả sản phẩm", "type": "navigate", "payload": "/products?sort=newest"})
+    return {"text": text, "actions": actions}
+
+
 # ── Recommend product ─────────────────────────────────────────────────────────
 
 _BUDGET_WORDS = {"trieu", "tr", "k", "trăm", "nghin", "tam", "tầm"}
@@ -321,7 +351,10 @@ async def handle_recommend_product(query: str | None) -> dict:
         if has_brand or has_model_num:
             return await handle_search_product(query)
 
-    data = await get_featured_products()
+    # get_featured_products() xếp hạng theo "sold" trên toàn catalog — phụ kiện bán
+    # chạy (ốp lưng, sạc...) sẽ lẫn vào câu trả lời tư vấn mua điện thoại nếu không
+    # lọc product_type (đã verify bug này qua test thật ở handle_llm tương ứng).
+    data = await get_products_filtered(product_type="phone", sort="popular", limit=4)
     products = []
     if data:
         products = data.get("products") or data.get("data") or []
@@ -387,8 +420,23 @@ async def handle_check_wallet(token: str | None) -> dict:
 
 async def handle_validate_coupon(coupon_code: str | None, token: str | None) -> dict:
     if not coupon_code:
+        # Không trích được mã cụ thể — người dùng đang hỏi CÓ mã gì, không phải kiểm tra
+        # 1 mã đã biết, nên liệt kê coupon thật từ GET /api/coupons thay vì hỏi lại.
+        data = await get_active_coupons(token)
+        coupons = (data.get("data") or []) if data else []
+        if not coupons:
+            return {
+                "text": "Hiện PhoneStore chưa có mã giảm giá nào đang áp dụng. Bạn theo dõi thêm thông báo từ shop nhé!",
+                "actions": [],
+            }
+        lines = []
+        for c in coupons[:6]:
+            value_str = f"{c['value']}%" if c.get("type") == "percent" else _fmt_price(c.get("value", 0))
+            min_order = c.get("minOrderValue") or 0
+            min_str = f" cho đơn từ {_fmt_price(min_order)}" if min_order else ""
+            lines.append(f"- {c.get('code', '')}: Giảm {value_str}{min_str}")
         return {
-            "text": "Vui lòng cho tôi biết mã giảm giá bạn muốn kiểm tra.\nVí dụ: 'Kiểm tra mã SALE10'",
+            "text": "Mã giảm giá đang áp dụng:\n" + "\n".join(lines) + "\nBạn áp dụng ở ô mã giảm giá khi thanh toán nhé!",
             "actions": [],
         }
 

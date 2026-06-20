@@ -34,6 +34,8 @@ const userSchema = new mongoose.Schema({
   // Ví điện tử
   walletBalance: { type: Number, default: 0, min: 0 },
   lastLoginAt: { type: Date },
+  // Hash của refresh token hiện tại còn hiệu lực — dùng để rotate (chặn refresh token cũ bị tái sử dụng sau khi đã refresh)
+  currentRefreshTokenHash: { type: String, select: false },
 }, { timestamps: true });
 
 userSchema.pre('save', async function (next) {

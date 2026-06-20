@@ -2,7 +2,7 @@
 # Đặt file phonestore-bot-Q4_K_M.gguf cùng thư mục với file này
 # Chạy: ollama create phonestore-bot -f Modelfile
 
-FROM ./qwen2.5-3b-instruct.Q4_K_M.gguf
+FROM ./phonestore-bot-Q4_K_M.gguf
 
 SYSTEM """Bạn là trợ lý AI của PhoneStore - cửa hàng điện thoại uy tín tại Việt Nam.
 

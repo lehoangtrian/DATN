@@ -15,7 +15,7 @@ export default function BrandPage() {
   useEffect(() => {
     setLoading(true);
     setError('');
-    getProductsByBrand(brand)
+    getProductsByBrand(brand, { productType: 'phone' })
       .then((res) => { setPhones(res.data.data); setTotal(res.data.pagination?.total || 0); })
       .catch(() => setError(`Không thể tải sản phẩm ${displayName}.`))
       .finally(() => setLoading(false));

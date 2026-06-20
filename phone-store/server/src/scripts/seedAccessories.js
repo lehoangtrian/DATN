@@ -3,17 +3,17 @@ const mongoose = require('mongoose');
 const { Brand, Category, Product, ProductVariant } = require('../models/index');
 
 const ACC_BRANDS = [
-  { name: 'Anker',   slug: 'anker',   logo: '', sortOrder: 10 },
-  { name: 'Baseus',  slug: 'baseus',  logo: '', sortOrder: 11 },
-  { name: 'Spigen',  slug: 'spigen',  logo: '', sortOrder: 12 },
+  { name: 'Anker',   slug: 'anker',   logo: '', sortOrder: 10, type: 'accessory' },
+  { name: 'Baseus',  slug: 'baseus',  logo: '', sortOrder: 11, type: 'accessory' },
+  { name: 'Spigen',  slug: 'spigen',  logo: '', sortOrder: 12, type: 'accessory' },
 ];
 
 const ACC_CATEGORIES = [
-  { name_vi: 'Tai nghe',          name_en: 'Headphones',       slug: 'tai-nghe',       sortOrder: 20 },
-  { name_vi: 'Sạc nhanh',         name_en: 'Fast Charger',     slug: 'sac-nhanh',      sortOrder: 21 },
-  { name_vi: 'Sạc không dây',     name_en: 'Wireless Charger', slug: 'sac-khong-day',  sortOrder: 22 },
-  { name_vi: 'Ốp lưng',           name_en: 'Phone Case',       slug: 'op-lung',        sortOrder: 23 },
-  { name_vi: 'Cáp sạc',           name_en: 'Charging Cable',   slug: 'cap-sac',        sortOrder: 24 },
+  { name_vi: 'Tai nghe',          name_en: 'Headphones',       slug: 'tai-nghe',       sortOrder: 20, type: 'accessory' },
+  { name_vi: 'Sạc nhanh',         name_en: 'Fast Charger',     slug: 'sac-nhanh',      sortOrder: 21, type: 'accessory' },
+  { name_vi: 'Sạc không dây',     name_en: 'Wireless Charger', slug: 'sac-khong-day',  sortOrder: 22, type: 'accessory' },
+  { name_vi: 'Ốp lưng',           name_en: 'Phone Case',       slug: 'op-lung',        sortOrder: 23, type: 'accessory' },
+  { name_vi: 'Cáp sạc',           name_en: 'Charging Cable',   slug: 'cap-sac',        sortOrder: 24, type: 'accessory' },
 ];
 
 const IMG = {

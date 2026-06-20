@@ -39,6 +39,7 @@ app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/payments', require('./routes/payment.routes'));
 app.use('/api/returns', require('./routes/return.routes'));
 app.use('/api/wallet', require('./routes/wallet.routes'));
+app.use('/api/loyalty', require('./routes/loyalty.routes'));
 app.use('/api/flash-sales', require('./routes/flashsale.routes'));
 app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/banners', require('./routes/banner.routes'));

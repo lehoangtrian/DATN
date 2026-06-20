@@ -31,7 +31,7 @@ instance.interceptors.response.use(
               .finally(() => { refreshPromise = null; });
           }
           const { data } = await refreshPromise;
-          const updated = { ...user, accessToken: data.data.accessToken };
+          const updated = { ...user, accessToken: data.data.accessToken, refreshToken: data.data.refreshToken };
           localStorage.setItem('user', JSON.stringify(updated));
           original.headers.Authorization = `Bearer ${data.data.accessToken}`;
           return instance(original);

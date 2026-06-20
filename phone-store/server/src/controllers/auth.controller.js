@@ -1,5 +1,5 @@
 const { User, OTP } = require('../models/index');
-const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt.utils');
+const { generateAccessToken, generateRefreshToken, verifyRefreshToken, hashRefreshToken } = require('../utils/jwt.utils');
 const { generateOTP, sendOTPEmail } = require('../utils/otp.utils');
 const { success, error } = require('../utils/response.utils');
 const { OAuth2Client } = require('google-auth-library');
@@ -11,6 +11,15 @@ const buildUserPayload = (user) => ({
   phone: user.phone, role: user.role, avatar: user.avatar,
   memberTier: user.memberTier, loyaltyPoints: user.loyaltyPoints,
 });
+
+// Cấp cặp access+refresh token mới, lưu hash refresh token vào user để hỗ trợ rotation
+// (refresh token cũ sẽ không còn khớp hash sau lần issue tiếp theo → chặn replay)
+const issueTokens = async (userId) => {
+  const accessToken = generateAccessToken(userId);
+  const refreshToken = generateRefreshToken(userId);
+  await User.findByIdAndUpdate(userId, { currentRefreshTokenHash: hashRefreshToken(refreshToken) });
+  return { accessToken, refreshToken };
+};
 
 // POST /api/auth/register
 const register = async (req, res, next) => {
@@ -70,8 +79,7 @@ const verifyOTP = async (req, res, next) => {
 
     if (type === 'verify_email') {
       const user = await User.findByIdAndUpdate(otp.userId, { isVerified: true }, { new: true });
-      const accessToken = generateAccessToken(user._id);
-      const refreshToken = generateRefreshToken(user._id);
+      const { accessToken, refreshToken } = await issueTokens(user._id);
       return success(res, { data: { user: { _id: user._id, name: user.name, email: user.email, role: user.role }, accessToken, refreshToken } }, 'Xác thực thành công');
     }
 
@@ -121,8 +129,7 @@ const login = async (req, res, next) => {
 
     await User.findByIdAndUpdate(user._id, { lastLoginAt: new Date() });
 
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
+    const { accessToken, refreshToken } = await issueTokens(user._id);
 
     return success(res, {
       data: {
@@ -143,11 +150,16 @@ const refreshToken = async (req, res, next) => {
     if (!token) return error(res, 'Refresh token là bắt buộc', 400);
 
     const decoded = verifyRefreshToken(token);
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.id).select('-password +currentRefreshTokenHash');
     if (!user || !user.isActive) return error(res, 'Token không hợp lệ', 401);
 
-    const accessToken = generateAccessToken(user._id);
-    return success(res, { data: { accessToken } }, 'Token đã được làm mới');
+    // Chỉ chấp nhận refresh token mới nhất đã cấp — chặn token cũ bị tái sử dụng (replay) sau khi đã rotate
+    if (user.currentRefreshTokenHash !== hashRefreshToken(token)) {
+      return error(res, 'Refresh token đã được sử dụng hoặc không còn hiệu lực, vui lòng đăng nhập lại', 401);
+    }
+
+    const { accessToken, refreshToken: newRefreshToken } = await issueTokens(user._id);
+    return success(res, { data: { accessToken, refreshToken: newRefreshToken } }, 'Token đã được làm mới');
   } catch (err) {
     next(err);
   }
@@ -243,8 +255,7 @@ const googleAuth = async (req, res, next) => {
     }
 
     await User.findByIdAndUpdate(user._id, { lastLoginAt: new Date() });
-    const jwtAccess = generateAccessToken(user._id);
-    const jwtRefresh = generateRefreshToken(user._id);
+    const { accessToken: jwtAccess, refreshToken: jwtRefresh } = await issueTokens(user._id);
 
     return success(res, { data: { user: buildUserPayload(user), accessToken: jwtAccess, refreshToken: jwtRefresh } }, 'Đăng nhập Google thành công');
   } catch (err) {
@@ -299,8 +310,7 @@ const facebookAuth = async (req, res, next) => {
     }
 
     await User.findByIdAndUpdate(user._id, { lastLoginAt: new Date() });
-    const fbJwtAccess = generateAccessToken(user._id);
-    const fbJwtRefresh = generateRefreshToken(user._id);
+    const { accessToken: fbJwtAccess, refreshToken: fbJwtRefresh } = await issueTokens(user._id);
 
     return success(res, { data: { user: buildUserPayload(user), accessToken: fbJwtAccess, refreshToken: fbJwtRefresh } }, 'Đăng nhập Facebook thành công');
   } catch (err) {

@@ -17,11 +17,11 @@ const orderSchema = new mongoose.Schema({
   orderCode: { type: String, unique: true },
   items: [orderItemSchema],
   shippingAddress: {
-    fullName: String,
-    phone: String,
-    address: String,
-    city: String,
-    district: String,
+    fullName: { type: String, required: true },
+    phone: { type: String, required: true },
+    address: { type: String, required: true },
+    city: { type: String, required: true },
+    district: { type: String, required: true },
   },
   shippingFee: { type: Number, default: 0 },
   shippingPartner: { type: String, enum: ['GHN', 'GHTK', 'ViettelPost', 'store_pickup'], default: 'GHN' },
@@ -33,6 +33,14 @@ const orderSchema = new mongoose.Schema({
   discountAmount: { type: Number, default: 0 },
   totalPrice: { type: Number, required: true },
   couponCode: { type: String },
+  // Điểm tích lũy dùng để giảm giá trực tiếp lúc đặt hàng (1 điểm = 1.000đ — khớp tỉ lệ
+  // hiển thị ở ProfilePage). pointsDiscount lưu lại số tiền quy đổi thực tế để audit.
+  pointsUsed: { type: Number, default: 0 },
+  pointsDiscount: { type: Number, default: 0 },
+  // Snapshot số điểm đã cộng cho user lúc đơn này được giao — dùng để trừ lại đúng tỉ lệ
+  // khi trả hàng (return) thay vì tính lại từ refundAmount, tránh lệch nếu hệ số nhân theo
+  // hạng thay đổi giữa lúc giao và lúc trả.
+  pointsEarned: { type: Number, default: 0 },
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'preparing', 'shipping', 'delivered', 'cancelled', 'return_requested', 'returned'],

@@ -7,13 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from intent import detect_intent, _extract_search_query, _extract_price_range, _extract_brand
+from intent import detect_intent, _extract_search_query, _extract_price_range, _extract_brand, _extract_category, filter_exact_match
 from templates import (
     handle_greeting,
     handle_check_order,
     handle_search_product,
     handle_product_detail,
     handle_price_range,
+    handle_new_arrivals,
     handle_recommend_product,
     handle_check_wallet,
     handle_validate_coupon,
@@ -27,7 +28,7 @@ from templates import (
     handle_fallback,
 )
 import llm as llm_client
-from actions import search_products, get_featured_products, get_orders, get_wallet, get_flash_sales, get_product_detail
+from actions import search_products, get_orders, get_wallet, get_flash_sales, get_product_detail
 
 BOT_MODE = os.getenv("BOT_MODE", "keyword").lower()
 
@@ -77,6 +78,7 @@ ASYNC_INTENT_HANDLERS = {
     "price_range":    lambda req, ex: handle_price_range(
         ex.get("min_price"), ex.get("max_price"), ex.get("brand")
     ),
+    "new_arrivals":   lambda req, ex: handle_new_arrivals(),
 }
 
 
@@ -114,6 +116,18 @@ def _needs_live_data(text: str) -> str | None:
         return "wallet"
     if any(w in t for w in ["flash sale", "đang sale", "khuyến mãi gì", "deal hôm nay"]):
         return "flash_sales"
+    if any(w in t for w in [
+        "mã giảm giá", "mã khuyến mãi", "mã ưu đãi", "mã code", "coupon", "voucher",
+    ]):
+        return "coupons"
+    if any(w in t for w in [
+        "mới ra mắt", "vừa ra mắt", "mới về", "hàng mới", "mới nhất", "sản phẩm mới", "máy mới",
+    ]):
+        return "new_arrivals"
+    if any(w in t for w in [
+        "best seller", "bestseller", "bán chạy", "bán nhiều nhất", "nổi bật", "phổ biến",
+    ]):
+        return "bestsellers"
     # Price range query — fetch filtered products
     if any(w in t for w in ["tầm", "dưới", "khoảng", "triệu", "ngân sách", "giá rẻ"]):
         return "price_range"
@@ -123,9 +137,18 @@ def _needs_live_data(text: str) -> str | None:
         "tìm", "có bán", "giá bao nhiêu", "bao nhiêu tiền",
         "còn hàng", "cho xem", "muốn mua", "chi tiết", "thông số",
         "màu sắc", "màu nào", "còn màu",
+        "tai nghe", "ốp lưng", "bao da", "sạc nhanh", "sạc không dây",
+        "sạc dự phòng", "cáp sạc", "dây sạc", "phụ kiện",
     ]):
         return "search"
     return None
+
+
+def _is_compare_request(text: str) -> bool:
+    """Phát hiện câu hỏi muốn so sánh nhiều sản phẩm — dùng để gắn thêm action
+    trỏ tới trang /compare?ids=... khi có ≥2 sản phẩm khớp, thay vì chỉ liệt kê giá."""
+    t = text.lower()
+    return any(w in t for w in ["so sánh", "so sanh", "compare"])
 
 
 def _format_products_detailed(data: dict | None, detail: dict | None = None) -> str:
@@ -182,6 +205,22 @@ def _format_orders(data: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _format_coupons(data: dict | None) -> str:
+    if not data:
+        return ""
+    coupons = data.get("data") or []
+    if not coupons:
+        return "Hiện không có mã giảm giá nào đang áp dụng."
+    lines = ["Mã giảm giá đang áp dụng:"]
+    for c in coupons[:6]:
+        code = c.get("code", "")
+        value_str = f"{c['value']}%" if c.get("type") == "percent" else f"{int(c.get('value', 0)):,}".replace(",", ".") + "₫"
+        min_order = c.get("minOrderValue") or 0
+        min_str = f" cho đơn từ {int(min_order):,}".replace(",", ".") + "₫" if min_order else ""
+        lines.append(f"- {code}: Giảm {value_str}{min_str}")
+    return "\n".join(lines)
+
+
 def _format_flash_sales(data: dict | None) -> str:
     if not data:
         return ""
@@ -223,27 +262,78 @@ async def handle_llm(req: ChatRequest) -> ChatResponse:
     elif need == "flash_sales":
         tools_context = _format_flash_sales(await get_flash_sales())
 
+    elif need == "coupons":
+        from actions import get_active_coupons
+        tools_context = _format_coupons(await get_active_coupons(req.user_token))
+        actions.append({"label": "Xem mã giảm giá", "type": "navigate", "payload": "/profile"})
+
+    elif need == "new_arrivals":
+        from actions import get_products_filtered
+        newest = await get_products_filtered(product_type="phone", sort="newest", limit=4)
+        tools_context = _format_products_detailed(newest)
+        actions.append({"label": "Xem tất cả sản phẩm", "type": "navigate", "payload": "/products?sort=newest"})
+
+    elif need == "bestsellers":
+        from actions import get_products_filtered
+        popular = await get_products_filtered(product_type="phone", sort="popular", limit=4)
+        tools_context = _format_products_detailed(popular)
+        actions.append({"label": "Xem tất cả sản phẩm", "type": "navigate", "payload": "/products?sort=popular"})
+
     elif need == "price_range":
         min_p, max_p = _extract_price_range(req.text)
         brand = _extract_brand(req.text)
         from actions import get_products_filtered
-        filtered = await get_products_filtered(brand=brand, min_price=min_p, max_price=max_p, limit=5)
+        filtered = await get_products_filtered(
+            brand=brand, product_type="phone", min_price=min_p, max_price=max_p, limit=5
+        )
         tools_context = _format_products_detailed(filtered)
         actions.append({"label": "Xem tất cả sản phẩm", "type": "navigate", "payload": "/products"})
 
     elif need == "search":
-        query = _extract_search_query(req.text)
-        if query:
-            search_data = await search_products(query, limit=4)
-            # Lấy detail sản phẩm đầu tiên để có variant/tồn kho
-            detail = None
-            products = (search_data.get("products") or search_data.get("data") or []) if search_data else []
-            if products and products[0].get("slug"):
-                detail = await get_product_detail(products[0]["slug"])
-            tools_context = _format_products_detailed(search_data, detail)
+        category = _extract_category(req.text)
+        matched_products: list[dict] = []
+        if category:
+            # Hỏi theo danh mục phụ kiện (vd "tai nghe", "ốp lưng") — tên sản phẩm thường
+            # là tên thương hiệu tiếng Anh nên search theo tên sẽ không khớp, phải filter
+            # theo category slug thật trên server thay vì tìm theo tên.
+            from actions import get_products_filtered
+            search_data = await get_products_filtered(category=category, limit=4)
+            tools_context = _format_products_detailed(search_data)
+            matched_products = (search_data.get("products") or search_data.get("data") or []) if search_data else []
         else:
-            tools_context = _format_products_detailed(await get_featured_products())
+            query = _extract_search_query(req.text)
+            if query:
+                search_data = await search_products(query, limit=4)
+                # Lấy detail sản phẩm đầu tiên để có variant/tồn kho
+                detail = None
+                matched_products = (search_data.get("products") or search_data.get("data") or []) if search_data else []
+                matched_products = filter_exact_match(matched_products, query)
+                search_data = {"data": matched_products}
+                if matched_products and matched_products[0].get("slug"):
+                    detail = await get_product_detail(matched_products[0]["slug"])
+                tools_context = _format_products_detailed(search_data, detail)
+            else:
+                # Không trích được query cụ thể (vd "tôi muốn mua điện thoại" — "điện thoại"
+                # là stopword quá chung) — dùng sản phẩm bán chạy nhưng PHẢI lọc product_type
+                # "phone": get_featured_products() xếp hạng theo "sold" trên toàn catalog,
+                # nên phụ kiện bán chạy (ốp lưng, sạc...) sẽ lẫn vào — đã verify bug này qua
+                # test thật (hỏi mua điện thoại, bot trả về kèm ốp lưng).
+                from actions import get_products_filtered
+                featured = await get_products_filtered(product_type="phone", sort="popular", limit=4)
+                tools_context = _format_products_detailed(featured)
         actions.append({"label": "Xem tất cả sản phẩm", "type": "navigate", "payload": "/products"})
+
+        # Câu hỏi "so sánh" + có ≥2 sản phẩm khớp → thêm action trỏ thẳng tới trang
+        # So sánh (đã có sẵn /compare?ids=...) thay vì chỉ liệt kê giá suông.
+        if _is_compare_request(req.text) and len(matched_products) >= 2:
+            # Tối đa 3 — khớp giới hạn của CompareContext phía client (toggle() chặn ở 3)
+            ids = [p["_id"] for p in matched_products[:3] if p.get("_id")]
+            if len(ids) >= 2:
+                actions.append({
+                    "label": "So sánh các sản phẩm này",
+                    "type": "navigate",
+                    "payload": f"/compare?ids={','.join(ids)}",
+                })
 
     reply_text = await llm_client.chat(messages=history, tools_context=tools_context)
 

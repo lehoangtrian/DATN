@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useCompare } from '../context/CompareContext';
 import Breadcrumb from '../components/ui/Breadcrumb';
 import { compareProducts } from '../api/products';
@@ -19,10 +19,22 @@ const SPEC_LABELS = [
 ];
 
 export default function ComparePage() {
-  const { list, remove, clear } = useCompare();
+  const { list, remove, clear, replace } = useCompare();
   const { addItem } = useCart();
   const [products, setProducts] = useState([]);
   const [loading, setLoading]   = useState(false);
+  const [searchParams] = useSearchParams();
+
+  // Deep-link: vào /compare?ids=id1,id2,id3 (vd từ action button của chatbot) sẽ
+  // nạp thẳng các id đó vào danh sách so sánh, không cần người dùng tự bấm thêm.
+  useEffect(() => {
+    const idsParam = searchParams.get('ids');
+    if (idsParam) {
+      const ids = idsParam.split(',').map((id) => id.trim()).filter(Boolean);
+      if (ids.length >= 2) replace(ids);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('ids')]);
 
   useEffect(() => {
     if (list.length === 0) { setProducts([]); return; }

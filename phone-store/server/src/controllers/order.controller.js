@@ -23,6 +23,8 @@ const createOrder = async (req, res, next) => {
   let totalPrice = 0;
   let couponDoc = null;
   let couponReserved = false;
+  let pointsUsed = 0;
+  let pointsDiscount = 0;
   let order = null;
 
   try {
@@ -59,6 +61,10 @@ const createOrder = async (req, res, next) => {
         stockErrors.push(`Sản phẩm "${product?.name || 'không xác định'}" không còn tồn tại`);
         continue;
       }
+      // Item đã giữ hàng (hold) còn hạn thì stock thật ĐÃ được trừ riêng ra cho user này
+      // từ lúc /cart/hold (xem cart.controller.js) — không so sánh variant.stock ở đây
+      // nữa vì số đó là phần CÒN LẠI cho người khác, không phải phần của user này.
+      if (item.holdExpiry && new Date(item.holdExpiry) > now) continue;
       if (variant.stock < item.quantity) {
         stockErrors.push(`"${product.name}" chỉ còn ${variant.stock} sản phẩm`);
       }
@@ -256,6 +262,36 @@ const createOrder = async (req, res, next) => {
 
     totalPrice = Math.max(0, subtotal + shippingFee - discountAmount);
 
+    // 4b. Dùng điểm tích lũy giảm giá thêm (1 điểm = 1.000đ — khớp tỉ lệ hiển thị ở
+    // ProfilePage). Trừ điểm ATOMIC trước khi tạo order, cùng pattern với trừ ví ở dưới —
+    // tránh race condition 2 request cùng dùng hết điểm. Không cho dùng quá totalPrice
+    // hiện tại (sau coupon) để giá đơn không âm.
+    const requestedPoints = Math.max(0, Math.floor(Number(req.body.pointsUsed) || 0));
+    if (requestedPoints > 0) {
+      const maxUsablePoints = Math.floor(totalPrice / 1000);
+      pointsUsed = Math.min(requestedPoints, maxUsablePoints);
+      if (pointsUsed > 0) {
+        const updatedUserPoints = await User.findOneAndUpdate(
+          { _id: req.user._id, loyaltyPoints: { $gte: pointsUsed } },
+          { $inc: { loyaltyPoints: -pointsUsed } },
+          { new: true }
+        );
+        if (!updatedUserPoints) {
+          await Promise.allSettled(flashSaleReservations.map(r =>
+            FlashSale.findByIdAndUpdate(r.id, { $inc: { sold: -r.quantity } })
+          ));
+          if (couponReserved) {
+            await Coupon.findByIdAndUpdate(couponDoc._id, {
+              $inc: { usedCount: -1 }, $pull: { usedBy: req.user._id },
+            }).catch(() => {});
+          }
+          return error(res, 'Số điểm tích lũy không đủ', 400);
+        }
+        pointsDiscount = pointsUsed * 1000;
+        totalPrice = Math.max(0, totalPrice - pointsDiscount);
+      }
+    }
+
     // 5. Trừ ví TRƯỚC khi tạo order (atomic để tránh race condition số dư)
     if (paymentMethod === 'wallet') {
       const updatedUser = await User.findOneAndUpdate(
@@ -264,7 +300,7 @@ const createOrder = async (req, res, next) => {
         { new: true }
       ).select('walletBalance');
       if (!updatedUser) {
-        // Rollback flash sales + coupon trước khi trả lỗi
+        // Rollback flash sales + coupon + điểm đã dùng trước khi trả lỗi
         await Promise.allSettled(flashSaleReservations.map(r =>
           FlashSale.findByIdAndUpdate(r.id, { $inc: { sold: -r.quantity } })
         ));
@@ -272,6 +308,9 @@ const createOrder = async (req, res, next) => {
           await Coupon.findByIdAndUpdate(couponDoc._id, {
             $inc: { usedCount: -1 }, $pull: { usedBy: req.user._id },
           }).catch(() => {});
+        }
+        if (pointsUsed > 0) {
+          await User.findByIdAndUpdate(req.user._id, { $inc: { loyaltyPoints: pointsUsed } }).catch(() => {});
         }
         return error(res,
           `Số dư ví không đủ. Cần thanh toán: ${totalPrice.toLocaleString('vi-VN')}đ`,
@@ -309,6 +348,8 @@ const createOrder = async (req, res, next) => {
       shippingFee,
       discountAmount,
       totalPrice,
+      pointsUsed,
+      pointsDiscount,
       couponCode: couponDoc && couponReserved ? couponDoc.code : undefined,
       note,
       estimatedDeliveryDate,
@@ -330,23 +371,35 @@ const createOrder = async (req, res, next) => {
     // nhiều đơn cùng chốt 1 variant gần hết hàng (tương tự pattern flash sale/coupon
     // ở bước 2 & 4). Nếu 1 item không đủ hàng, throw để catch block rollback toàn bộ
     // (bao gồm cả các item đã trừ thành công trong vòng for này — xem stockReservations).
+    //
+    // Item đã hold còn hạn: stock thật ĐÃ bị trừ lúc /cart/hold rồi — KHÔNG trừ lần 2 ở
+    // đây (sẽ double-deduct kho). Chỉ ghi nhận lại để có StockLog audit + rollback đúng
+    // nếu order thất bại giữa đường (rollback phải trả về kho vì nó coi như "đã trừ").
     for (const item of orderableItems) {
-      const updated = await ProductVariant.findOneAndUpdate(
-        { _id: item.variantId._id, stock: { $gte: item.quantity } },
-        { $inc: { stock: -item.quantity } },
-        { new: false } // trả về doc TRƯỚC khi trừ để có stockBefore cho StockLog
-      );
-      if (!updated) {
-        throw Object.assign(
-          new Error(`"${item.productId.name}" không đủ hàng trong kho`),
-          { statusCode: 400 }
+      const alreadyHeld = item.holdExpiry && new Date(item.holdExpiry) > now;
+      let stockBefore;
+      if (alreadyHeld) {
+        const current = await ProductVariant.findById(item.variantId._id).select('stock').lean();
+        stockBefore = (current?.stock ?? 0) + item.quantity; // stock trước khi trừ lúc hold
+      } else {
+        const updated = await ProductVariant.findOneAndUpdate(
+          { _id: item.variantId._id, stock: { $gte: item.quantity } },
+          { $inc: { stock: -item.quantity } },
+          { new: false } // trả về doc TRƯỚC khi trừ để có stockBefore cho StockLog
         );
+        if (!updated) {
+          throw Object.assign(
+            new Error(`"${item.productId.name}" không đủ hàng trong kho`),
+            { statusCode: 400 }
+          );
+        }
+        stockBefore = updated.stock;
       }
       stockReservations.push({
         variantId: item.variantId._id,
         productId: item.productId._id,
         quantity: item.quantity,
-        stockBefore: updated.stock,
+        stockBefore,
       });
     }
 
@@ -383,6 +436,17 @@ const createOrder = async (req, res, next) => {
           ProductVariant.findByIdAndUpdate(r.variantId, { $inc: { stock: r.quantity } })
         )
       );
+      // Quan trọng: phải xóa luôn holdExpiry của các item này trong cart — vì stock vừa
+      // được hoàn lại (coi như hold không còn hiệu lực nữa). Nếu không xóa, lần retry
+      // createOrder tiếp theo sẽ thấy holdExpiry vẫn còn hạn → tưởng đã có stock dự trữ
+      // → bỏ qua trừ kho lần nữa → bán hàng mà không có stock thật đứng sau (oversell).
+      if (cart?._id) {
+        await Cart.findByIdAndUpdate(
+          cart._id,
+          { $unset: { 'items.$[affected].holdExpiry': '' } },
+          { arrayFilters: [{ 'affected.variantId': { $in: stockReservations.map((r) => r.variantId) } }] }
+        ).catch(() => {});
+      }
     }
     // Rollback flash sale reservations
     if (flashSaleReservations?.length) {
@@ -419,6 +483,10 @@ const createOrder = async (req, res, next) => {
     // Rollback ví nếu đã trừ tiền
     if (paymentMethod === 'wallet' && walletBalanceAfter !== null) {
       await User.findByIdAndUpdate(req.user._id, { $inc: { walletBalance: totalPrice } }).catch(() => {});
+    }
+    // Rollback điểm tích lũy đã dùng nếu order chưa kịp tạo / side-effect sau đó lỗi
+    if (pointsUsed > 0) {
+      await User.findByIdAndUpdate(req.user._id, { $inc: { loyaltyPoints: pointsUsed } }).catch(() => {});
     }
     // Nếu order đã tạo nhưng side effects thất bại → huỷ order để tránh trạng thái không nhất quán
     if (order) {

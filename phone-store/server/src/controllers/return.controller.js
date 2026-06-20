@@ -12,7 +12,7 @@ const RETURN_REASONS = [
 // POST /api/returns
 const createReturn = async (req, res, next) => {
   try {
-    const { orderId, reason, description, refundBankInfo } = req.body;
+    const { orderId, reason, description, refundBankInfo, items } = req.body;
 
     if (!RETURN_REASONS.includes(reason)) {
       return error(res, 'Lý do trả hàng không hợp lệ', 400);
@@ -35,12 +35,39 @@ const createReturn = async (req, res, next) => {
     const daysSince = (Date.now() - new Date(deliveredAt).getTime()) / (1000 * 60 * 60 * 24);
     if (daysSince > 7) return error(res, 'Đã quá 7 ngày kể từ khi nhận hàng, không thể yêu cầu trả', 400);
 
+    // Nếu client chỉ định items cụ thể (trả 1 phần đơn) → tính refund theo đúng sản phẩm/số lượng đó.
+    // Nếu không chỉ định (UI hiện tại trả cả đơn) → giữ hành vi cũ: hoàn toàn bộ totalPrice.
+    let returnItems = [];
+    let refundAmount = order.totalPrice;
+
+    if (Array.isArray(items) && items.length > 0) {
+      refundAmount = 0;
+      for (const reqItem of items) {
+        const orderItem = order.items.find((oi) => oi._id.toString() === reqItem.orderItemId);
+        if (!orderItem) {
+          return error(res, 'Sản phẩm trả hàng không khớp với đơn hàng', 400);
+        }
+        const qty = Number(reqItem.quantity) || 0;
+        if (qty <= 0 || qty > orderItem.quantity) {
+          return error(res, `Số lượng trả của "${orderItem.name}" không hợp lệ`, 400);
+        }
+        refundAmount += orderItem.price * qty;
+        returnItems.push({
+          orderItemId: orderItem._id,
+          productId: orderItem.productId,
+          quantity: qty,
+          reason: reqItem.reason || reason,
+        });
+      }
+    }
+
     const returnReq = await ReturnRequest.create({
       orderId,
       userId: req.user._id,
       reason,
       description,
-      refundAmount: order.totalPrice,
+      items: returnItems,
+      refundAmount,
       refundBankInfo: refundBankInfo || undefined,
     });
 

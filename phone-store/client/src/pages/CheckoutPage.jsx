@@ -7,7 +7,8 @@ import { holdStock, releaseHold } from '../api/cart';
 import { createOrder } from '../api/orders';
 import { formatPrice } from '../utils/formatPrice';
 import { getWalletBalance } from '../api/wallet';
-import { MapPin, CreditCard, CheckCircle, ChevronRight, Truck, Banknote, Building2, Wallet } from 'lucide-react';
+import { getMe } from '../api/auth';
+import { MapPin, CreditCard, CheckCircle, ChevronRight, Truck, Banknote, Building2, Wallet, Gem } from 'lucide-react';
 import Breadcrumb from '../components/ui/Breadcrumb';
 import { createVNPayPaymentUrl } from '../api/payments';
 
@@ -20,6 +21,8 @@ export default function CheckoutPage() {
   const [error, setError] = useState('');
   const [holdInfo, setHoldInfo] = useState(null);
   const [walletBalance, setWalletBalance] = useState(0);
+  const [pointsBalance, setPointsBalance] = useState(0);
+  const [pointsToUse, setPointsToUse] = useState(0);
 
   const { items, clearCart, cartLoading } = useCart();
   const { user } = useAuth();
@@ -47,6 +50,7 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     getWalletBalance().then((r) => setWalletBalance(r.data.data?.balance || 0)).catch(() => {});
+    getMe().then((r) => setPointsBalance(r.data.data?.loyaltyPoints || 0)).catch(() => {});
   }, []);
 
   // Release hold khi user rời trang giữa chừng (sau khi đã hold stock ở step 1)
@@ -57,7 +61,12 @@ export default function CheckoutPage() {
   }, [holdInfo]);
 
   const shippingFee = total >= 5000000 ? 0 : 30000;
-  const grandTotal = Math.max(0, total + shippingFee - discountAmount);
+  const totalAfterCoupon = Math.max(0, total + shippingFee - discountAmount);
+  // 1 điểm = 1.000đ — không cho dùng quá số điểm đang có lẫn quá phần còn phải trả
+  const maxUsablePoints = Math.max(0, Math.min(pointsBalance, Math.floor(totalAfterCoupon / 1000)));
+  const pointsUsed = Math.min(pointsToUse, maxUsablePoints);
+  const pointsDiscount = pointsUsed * 1000;
+  const grandTotal = Math.max(0, totalAfterCoupon - pointsDiscount);
 
   const PAYMENT_METHODS = [
     { value: 'cod',           label: 'Thanh toán khi nhận hàng (COD)', icon: Banknote,  desc: 'Thanh toán bằng tiền mặt khi nhận hàng' },
@@ -107,6 +116,7 @@ export default function CheckoutPage() {
         shippingPartner: 'GHN',
         note: addr.note,
         couponCode: coupon?.code || undefined,
+        pointsUsed: pointsUsed || undefined,
         selectedVariantIds: selectedVariantIds || undefined,
       });
 
@@ -370,7 +380,45 @@ export default function CheckoutPage() {
                   <span>-{formatPrice(discountAmount)}</span>
                 </div>
               )}
+              {pointsDiscount > 0 && (
+                <div className="flex justify-between text-green-600 font-medium">
+                  <span>Điểm tích lũy ({pointsUsed} điểm)</span>
+                  <span>-{formatPrice(pointsDiscount)}</span>
+                </div>
+              )}
             </div>
+
+            {/* Dùng điểm tích lũy */}
+            {pointsBalance > 0 && (
+              <div className="border-t mt-3 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                    <Gem size={14} className="text-blue-500" /> Dùng điểm tích lũy
+                  </span>
+                  <span className="text-xs text-gray-400">Có {pointsBalance.toLocaleString('vi-VN')} điểm</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={maxUsablePoints}
+                    value={pointsToUse || ''}
+                    onChange={(e) => setPointsToUse(Math.max(0, Math.min(maxUsablePoints, Number(e.target.value) || 0)))}
+                    placeholder="0"
+                    className="input-field py-1.5 text-sm flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPointsToUse(maxUsablePoints)}
+                    className="text-xs text-blue-600 font-medium px-2.5 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50 whitespace-nowrap"
+                  >
+                    Dùng tối đa
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">1 điểm = 1.000đ · tối đa {maxUsablePoints.toLocaleString('vi-VN')} điểm cho đơn này</p>
+              </div>
+            )}
+
             <div className="border-t mt-3 pt-3 flex justify-between font-bold text-base">
               <span>Tổng cộng</span>
               <span className="text-blue-600">{formatPrice(grandTotal)}</span>

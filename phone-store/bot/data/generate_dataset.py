@@ -93,6 +93,19 @@ def format_products_context(products: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def format_coupons_context(coupons: list[dict]) -> str:
+    """Giống main.py _format_coupons() — coupons là list dict {code, type, value, minOrderValue}."""
+    if not coupons:
+        return "Hiện không có mã giảm giá nào đang áp dụng."
+    lines = ["Mã giảm giá đang áp dụng:"]
+    for c in coupons[:6]:
+        value_str = f"{c['value']}%" if c["type"] == "percent" else fmt(c["value"])
+        min_order = c.get("minOrderValue") or 0
+        min_str = f" cho đơn từ {fmt(min_order)}" if min_order else ""
+        lines.append(f"- {c['code']}: Giảm {value_str}{min_str}")
+    return "\n".join(lines)
+
+
 def format_product_with_variants_context(p: dict) -> str:
     """Giống main.py _format_products_detailed() khi có detail cho sp đầu tiên."""
     rating_str = f" ⭐{p['rating']:.1f}" if p.get("rating") else ""
@@ -115,6 +128,10 @@ def fetch_product_info(db) -> list[dict]:
         pid = str(v["productId"])
         variants_by_product.setdefault(pid, []).append(v)
 
+    cats = list(db.categories.find({}, {"slug": 1, "type": 1}))
+    cat_slug_by_id = {str(c["_id"]): c.get("slug", "") for c in cats}
+    cat_type_by_id = {str(c["_id"]): c.get("type", "phone") for c in cats}
+
     info = []
     for p in products:
         name = (p.get("name") or "").strip()
@@ -133,6 +150,8 @@ def fetch_product_info(db) -> list[dict]:
             "slug": p.get("slug", ""),
             "price": min_price,
             "rating": p.get("rating", 0),
+            "categorySlug": cat_slug_by_id.get(str(p.get("categoryId", "")), ""),
+            "categoryType": cat_type_by_id.get(str(p.get("categoryId", "")), "phone"),
             "variants": [
                 {
                     "color": v.get("color", ""),
@@ -422,8 +441,7 @@ def gen_validate_coupon() -> list[dict]:
 
     general_qs = [
         "Tôi có mã giảm giá, dùng thế nào?", "Nhập coupon ở đâu?",
-        "Mã khuyến mãi dùng như thế nào?", "Có code giảm giá không?",
-        "PhoneStore có mã giảm giá nào không?", "Dùng voucher thế nào?",
+        "Mã khuyến mãi dùng như thế nào?", "Dùng voucher thế nào?",
         "Mã giảm giá có điều kiện gì không?", "Mã áp dụng cho sản phẩm nào?",
         "Một tài khoản dùng được mấy mã?", "Mã giảm giá có hết hạn không?",
         "Khi nào có mã giảm giá mới?", "Đăng ký thành viên có mã giảm giá không?",
@@ -436,6 +454,51 @@ def gen_validate_coupon() -> list[dict]:
     ]
     for q in general_qs:
         samples.append(s(q, GENERAL_ANSWER))
+
+    return samples
+
+
+def gen_coupon_list() -> list[dict]:
+    """Hỏi 'hiện có mã giảm giá nào' — main.py._needs_live_data() trả về need='coupons',
+    bot gọi GET /api/coupons thật và chèn context qua format_coupons_context(). Không sinh
+    mẫu này thì model không biết format context "Mã giảm giá đang áp dụng:" / "Hiện không
+    có mã giảm giá nào đang áp dụng." là gì, dẫn đến BỊA mã giảm giá không tồn tại (đã verify
+    bug này qua test thật — hỏi mã giảm giá lúc DB rỗng, model tự bịa ra 3 mã giả)."""
+    questions = [
+        "Cửa hàng hiện có các mã giảm giá nào?", "Shop có mã giảm giá nào không?",
+        "PhoneStore có mã giảm giá nào không?", "Có code giảm giá không?",
+        "Hiện có mã giảm giá nào đang áp dụng không?", "Mã giảm giá nào dùng được bây giờ?",
+        "Cho tôi xem các mã giảm giá hiện có", "Đang có voucher gì không?",
+        "Có coupon nào đang chạy không?", "Liệt kê mã giảm giá hiện tại giúp tôi",
+    ]
+    CODE_POOL = [
+        {"code": "SALE10", "type": "percent", "value": 10, "minOrderValue": 200_000},
+        {"code": "PHONE20", "type": "percent", "value": 20, "minOrderValue": 5_000_000},
+        {"code": "DEAL50", "type": "fixed", "value": 50_000, "minOrderValue": 0},
+        {"code": "SUMMER15", "type": "percent", "value": 15, "minOrderValue": 1_000_000},
+        {"code": "VIP30", "type": "percent", "value": 30, "minOrderValue": 10_000_000},
+        {"code": "HOT100K", "type": "fixed", "value": 100_000, "minOrderValue": 2_000_000},
+    ]
+
+    samples = []
+    for q in questions:
+        # ~1/3 mẫu mô phỏng lúc DB rỗng (đúng tình trạng thật hiện tại) — dạy model trả
+        # lời trung thực "chưa có mã" thay vì bịa, khi context không liệt kê mã nào.
+        if random.random() < 0.35:
+            coupons = []
+        else:
+            coupons = random.sample(CODE_POOL, k=random.randint(1, 4))
+        context = format_coupons_context(coupons)
+        if coupons:
+            names = ", ".join(
+                f"{c['code']} (giảm {c['value']}%)" if c["type"] == "percent"
+                else f"{c['code']} (giảm {fmt(c['value'])})"
+                for c in coupons
+            )
+            answer = f"PhoneStore hiện có các mã: {names}. Bạn áp dụng ở ô mã giảm giá khi thanh toán nhé!"
+        else:
+            answer = "Hiện PhoneStore chưa có mã giảm giá nào đang áp dụng. Bạn theo dõi thêm thông báo từ shop nhé!"
+        samples.append(s(q, answer, context=context))
 
     return samples
 
@@ -560,7 +623,14 @@ def gen_named_search_samples(products_info: list[dict]) -> list[dict]:
 
 
 def gen_price_range(products_info: list[dict]) -> list[dict]:
-    """Hỏi máy tầm giá — lọc sản phẩm thật theo khoảng giá, kèm context khi có kết quả."""
+    """Hỏi máy tầm giá — lọc sản phẩm thật theo khoảng giá, kèm context khi có kết quả.
+
+    Chỉ xét sản phẩm categoryType="phone" — khớp với fix main.py/actions.py
+    (get_products_filtered(product_type="phone")) cho intent price_range. Nếu không lọc,
+    phụ kiện rẻ (cáp sạc, ốp lưng...) sẽ lọt vào câu trả lời "máy tầm giá X triệu" vì luôn
+    rẻ hơn điện thoại — đã verify bug này qua test thật (bot trả lời phụ kiện khi hỏi
+    "điện thoại dưới 15 triệu")."""
+    products_info = [p for p in products_info if p.get("categoryType", "phone") == "phone"]
     ANSWERS_NO_MATCH = [
         "PhoneStore hiện chưa có sản phẩm trong tầm giá đó. Bạn có thể nới rộng ngân sách hoặc xem các dòng khác trên website nhé!",
         "Hiện chưa tìm thấy máy phù hợp khoảng giá này. Bạn thử mở rộng tầm giá hoặc cho mình biết hãng bạn thích để tư vấn thêm nhé!",
@@ -614,13 +684,74 @@ def gen_price_range(products_info: list[dict]) -> list[dict]:
     return samples
 
 
+def gen_new_arrivals(products_info: list[dict]) -> list[dict]:
+    """Hỏi 'sản phẩm mới ra mắt/mới nhất' — main.py._needs_live_data() trả về
+    need='new_arrivals', bot gọi get_products_filtered(sort="newest") thật. Context dùng
+    CHUNG format với search_product (format_products_context — "Sản phẩm tìm được:"), nên
+    nếu không có mẫu riêng, model sẽ trả lời kiểu "PhoneStore hiện có: ..." (đúng nhưng
+    không khớp ngữ cảnh "mới ra mắt") hoặc mơ hồ không liệt kê — đã verify qua test thật."""
+    products_info = [p for p in products_info if p.get("categoryType", "phone") == "phone"]
+    questions = [
+        "Sản phẩm nào mới ra mắt gần đây?", "Có máy mới về không?",
+        "Hàng mới nhất là gì?", "Điện thoại mới ra mắt có gì?",
+        "Model mới nhất của PhoneStore là gì?", "Máy nào vừa ra mắt?",
+        "Có sản phẩm mới không?", "PhoneStore có hàng mới về chưa?",
+        "Xem các máy mới ra mắt giúp tôi", "Điện thoại mới nhất hiện nay?",
+    ]
+    samples = []
+    for q in questions:
+        matched = products_info[:4] if products_info else []
+        if matched:
+            context = format_products_context(matched)
+            names_prices = ", ".join(f"{m['name']} ({fmt(m['price'])})" for m in matched)
+            answer = f"Sản phẩm mới ra mắt tại PhoneStore: {names_prices}. Bạn xem chi tiết trên website nhé!"
+            samples.append(s(q, answer, context=context))
+        else:
+            samples.append(s(q, "Hiện chưa có thông tin sản phẩm mới. Bạn xem toàn bộ sản phẩm trên website nhé!"))
+
+    return samples
+
+
+def gen_bestsellers(products_info: list[dict]) -> list[dict]:
+    """Hỏi 'best seller/bán chạy' — main.py._needs_live_data() trả về need='bestsellers',
+    bot gọi get_products_filtered(sort="popular") thật. Cùng lý do với gen_new_arrivals: nếu
+    không có mẫu riêng, model không biết liên hệ context "Sản phẩm tìm được:" với khung trả
+    lời "bán chạy" — đã verify qua test thật (hỏi "best seller" model trả lời lạc đề hẳn
+    sang chuyện đơn hàng)."""
+    products_info = [p for p in products_info if p.get("categoryType", "phone") == "phone"]
+    questions = [
+        "Các sản phẩm best seller?", "Sản phẩm nào bán chạy nhất?",
+        "Điện thoại bán chạy nhất hiện nay?", "Bestseller của PhoneStore là gì?",
+        "Máy nào bán nhiều nhất?", "Top sản phẩm bán chạy đi",
+        "Sản phẩm nổi bật nhất là gì?", "Điện thoại phổ biến nhất hiện tại?",
+        "Cho tôi xem các best seller", "Máy nào được mua nhiều nhất?",
+    ]
+    samples = []
+    for q in questions:
+        matched = products_info[:4] if products_info else []
+        if matched:
+            context = format_products_context(matched)
+            names_prices = ", ".join(f"{m['name']} ({fmt(m['price'])})" for m in matched)
+            answer = f"Các sản phẩm bán chạy tại PhoneStore: {names_prices}. Bạn xem chi tiết trên website nhé!"
+            samples.append(s(q, answer, context=context))
+        else:
+            samples.append(s(q, "Hiện chưa có dữ liệu bán chạy. Bạn xem toàn bộ sản phẩm trên website nhé!"))
+
+    return samples
+
+
 def gen_search_product(products_info: list[dict]) -> list[dict]:
     """Hỏi tìm sản phẩm theo hãng/danh mục — kèm context nếu khớp được hãng trong DB."""
     ANSWERS_NO_DATA = [
         "Bạn thử dùng thanh tìm kiếm trên website hoặc vào trang Sản phẩm để lọc theo hãng và giá. Cần tư vấn thêm thì nói mình nghe!",
         "Mình có thể giúp bạn tìm! Bạn muốn tìm sản phẩm cụ thể nào hoặc hãng nào vậy?",
     ]
-    CATEGORIES = ["điện thoại", "phụ kiện", "tai nghe", "sạc dự phòng", "ốp lưng", "cáp sạc"]
+    # CHÚ Ý: "tai nghe", "ốp lưng", "sạc nhanh", "sạc không dây", "cáp sạc" KHÔNG được
+    # đặt ở đây nữa — main.py giờ có _extract_category() tra category thật + RAG context
+    # (xem gen_category_accessory_samples), nên các từ này phải dùng dữ liệu thật, không
+    # phải câu trả lời chung chung — để cả 2 cùng tồn tại sẽ dạy model 2 hành vi mâu thuẫn
+    # cho cùng 1 từ khóa. "sạc dự phòng" vẫn ở đây vì PhoneStore thực sự không bán power bank.
+    CATEGORIES_NO_DATA = ["điện thoại", "phụ kiện", "sạc dự phòng", "pin dự phòng"]
     BRAND_KEYWORDS = {
         "Apple": "iphone", "iPhone": "iphone", "Samsung": "samsung",
         "Xiaomi": "xiaomi", "OPPO": "oppo", "Vivo": "vivo",
@@ -628,15 +759,21 @@ def gen_search_product(products_info: list[dict]) -> list[dict]:
     }
 
     samples = []
-    for cat in CATEGORIES:
+    for cat in CATEGORIES_NO_DATA:
         for q in [f"Shop có {cat} không?", f"PhoneStore bán {cat} không?",
                    f"Tìm {cat} trên PhoneStore", f"Xem {cat} đi"]:
             samples.append(s(q, random.choice(ANSWERS_NO_DATA)))
 
     for brand_label, kw in BRAND_KEYWORDS.items():
         matched = [p for p in products_info if kw in p["name"].lower()][:4]
+        # "muốn mua + tên hãng chung" (không phải tên sản phẩm cụ thể) PHẢI có mẫu riêng —
+        # nếu không, model chỉ thấy "muốn mua" đi kèm tên sản phẩm cụ thể (xem
+        # gen_named_search_samples) và học nhầm rằng "muốn mua" luôn = chỉ nói về 1 sản
+        # phẩm, dù context thực tế có nhiều sản phẩm (đã verify bug này qua test thật).
         qs = [f"Có {brand_label} không?", f"Điện thoại {brand_label} nào đang có?",
-              f"Xem {brand_label} đi", f"PhoneStore có {brand_label} không?"]
+              f"Xem {brand_label} đi", f"PhoneStore có {brand_label} không?",
+              f"Muốn mua điện thoại {brand_label}", f"Tôi muốn mua {brand_label}",
+              f"Mình muốn mua điện thoại {brand_label}", f"Cho mình mua điện thoại {brand_label}"]
         if matched:
             context = format_products_context(matched)
             names_prices = ", ".join(f"{m['name']} ({fmt(m['price'])})" for m in matched)
@@ -653,6 +790,55 @@ def gen_search_product(products_info: list[dict]) -> list[dict]:
         "Có hàng mới về không?", "Máy nào mới ra gần đây?",
     ]:
         samples.append(s(q, random.choice(ANSWERS_NO_DATA)))
+
+    return samples
+
+
+# Category slug thật trên server (xem bot/intent.py CATEGORY_KEYWORDS) → các cách hỏi
+# tiếng Việt tự nhiên tương ứng. Phải khớp đúng slug để gen_category_accessory_samples
+# group sản phẩm chính xác theo từng danh mục.
+ACCESSORY_CATEGORY_PHRASES = {
+    "tai-nghe": ["tai nghe"],
+    "sac-khong-day": ["sạc không dây", "đế sạc không dây"],
+    "sac-nhanh": ["sạc nhanh", "cục sạc", "củ sạc"],
+    "op-lung": ["ốp lưng", "bao da", "case điện thoại"],
+    "cap-sac": ["cáp sạc", "dây sạc"],
+}
+
+
+def gen_category_accessory_samples(products_info: list[dict]) -> list[dict]:
+    """Hỏi mua phụ kiện theo TỪ KHÓA DANH MỤC (vd "tai nghe", "ốp lưng") — không phải
+    theo tên sản phẩm cụ thể. Tên sản phẩm phụ kiện toàn thương hiệu tiếng Anh (vd "Anker
+    Soundcore Q20i") nên search theo tên sẽ không khớp — main.py._extract_category() tra
+    category slug thật rồi gọi get_products_filtered(category=slug), kèm RAG context theo
+    đúng format format_products_context() (KHÔNG có variant detail, khác với product_qa).
+    Nếu không sinh mẫu đúng cho các từ khóa này, model sẽ học nhầm theo các mẫu cũ dạy
+    "trả lời chung chung" (gen_search_product) — dẫn đến bot bỏ qua context thật khi trả lời."""
+    by_category: dict[str, list[dict]] = {}
+    for p in products_info:
+        slug = p.get("categorySlug")
+        if slug in ACCESSORY_CATEGORY_PHRASES:
+            by_category.setdefault(slug, []).append(p)
+
+    samples = []
+    for slug, phrases in ACCESSORY_CATEGORY_PHRASES.items():
+        matched = by_category.get(slug, [])[:4]
+        if not matched:
+            continue
+        context = format_products_context(matched)
+        names_prices = ", ".join(f"{m['name']} ({fmt(m['price'])})" for m in matched)
+
+        for phrase in phrases:
+            questions = [
+                f"Tôi muốn mua {phrase}", f"Shop có {phrase} không?",
+                f"PhoneStore có bán {phrase} không?", f"Tìm {phrase} giúp mình",
+                f"Cho xem {phrase} đi", f"Có {phrase} không?",
+                f"{phrase} giá bao nhiêu?", f"{phrase} còn hàng không?",
+                f"Mình cần mua {phrase}", f"Tư vấn {phrase} giúp mình",
+            ]
+            answer = f"PhoneStore hiện có: {names_prices}. Bạn xem chi tiết trên website nhé!"
+            for q in random.sample(questions, k=min(5, len(questions))):
+                samples.append(s(q, answer, context=context))
 
     return samples
 
@@ -776,8 +962,8 @@ def gen_recommend() -> list[dict]:
     questions = [
         "Nên mua điện thoại nào?", "Tư vấn mua máy giúp mình",
         "Điện thoại nào tốt nhất hiện nay?", "Gợi ý máy tốt đi",
-        "Mình muốn mua máy mới, nên chọn gì?", "Điện thoại bán chạy nhất là gì?",
-        "Máy nào đang hot nhất?", "Điện thoại chụp ảnh đẹp nhất?",
+        "Mình muốn mua máy mới, nên chọn gì?",
+        "Điện thoại chụp ảnh đẹp nhất?",
         "Máy nào pin trâu nhất?", "Điện thoại chơi game tốt nhất?",
         "Máy nào đáng mua nhất?", "iPhone hay Samsung thì nên mua?",
         "iPhone với Xiaomi cái nào tốt hơn?", "Samsung hay OPPO?",
@@ -926,6 +1112,7 @@ def main():
         ("named_search",     gen_named_search_samples(products_info)),
         ("price_range",      gen_price_range(products_info)),
         ("search_product",   gen_search_product(products_info)),
+        ("category_accessory", gen_category_accessory_samples(products_info)),
         ("check_order",      gen_check_order_context()),
         ("check_wallet",     gen_check_wallet_context()),
         ("flash_sale",       gen_flash_sale_context()),
@@ -937,6 +1124,9 @@ def main():
         ("contact_info",     gen_contact_info()),
         ("return_product",   gen_return_product()),
         ("validate_coupon",  gen_validate_coupon()),
+        ("coupon_list",      gen_coupon_list()),
+        ("new_arrivals",     gen_new_arrivals(products_info)),
+        ("bestsellers",      gen_bestsellers(products_info)),
         ("recommend",        gen_recommend()),
         ("product_advice",   gen_product_advice(product_names)),
         ("product_compare",  gen_product_pair_comparison(product_names)),

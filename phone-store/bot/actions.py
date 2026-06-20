@@ -18,13 +18,17 @@ async def get_orders(token: str) -> dict | None:
         return None
 
 
-async def search_products(query: str, limit: int = 5) -> dict | None:
+async def search_products(query: str, limit: int = 5, product_type: str | None = "phone") -> dict | None:
+    """Tìm sản phẩm theo tên. Mặc định product_type="phone" vì mọi nơi gọi hàm này trong
+    bot đều tìm điện thoại theo tên/hãng (BRANDS trong intent.py chỉ là hãng điện thoại) —
+    nếu không lọc, tên ốp lưng/case có chứa tên máy (vd "Apple Clear Case iPhone 15 Pro")
+    sẽ lẫn vào kết quả tìm điện thoại (đã verify bug này qua test thật)."""
     try:
+        params: dict = {"q": query, "limit": limit}
+        if product_type:
+            params["productType"] = product_type
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.get(
-                f"{NODE_API}/products/search",
-                params={"q": query, "limit": limit},
-            )
+            r = await client.get(f"{NODE_API}/products/search", params=params)
             return r.json() if r.status_code == 200 else None
     except Exception:
         return None
@@ -42,31 +46,28 @@ async def get_product_detail(slug: str) -> dict | None:
 
 async def get_products_filtered(
     brand: str | None = None,
+    category: str | None = None,
+    product_type: str | None = None,
     min_price: int | None = None,
     max_price: int | None = None,
     sort: str = "price_asc",
     limit: int = 6,
 ) -> dict | None:
-    """GET /api/products với filter giá và thương hiệu."""
+    """GET /api/products với filter giá, thương hiệu, danh mục (category slug)."""
     try:
         params: dict = {"limit": limit, "sort": sort}
         if brand:
             params["brand"] = brand
+        if category:
+            params["category"] = category
+        if product_type:
+            params["productType"] = product_type
         if min_price is not None:
             params["minPrice"] = min_price
         if max_price is not None:
             params["maxPrice"] = max_price
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.get(f"{NODE_API}/products", params=params)
-            return r.json() if r.status_code == 200 else None
-    except Exception:
-        return None
-
-
-async def get_featured_products() -> dict | None:
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.get(f"{NODE_API}/products/featured")
             return r.json() if r.status_code == 200 else None
     except Exception:
         return None
@@ -101,6 +102,18 @@ async def get_flash_sales() -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.get(f"{NODE_API}/flash-sales")
+            return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+async def get_active_coupons(token: str | None = None) -> dict | None:
+    """GET /api/coupons — danh sách mã giảm giá public đang active (optionalAuth: có
+    token thì server còn lọc thêm theo hạng thành viên)."""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            headers = _auth_headers(token) if token else {}
+            r = await client.get(f"{NODE_API}/coupons", headers=headers)
             return r.json() if r.status_code == 200 else None
     except Exception:
         return None

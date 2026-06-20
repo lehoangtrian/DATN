@@ -7,6 +7,9 @@ const categorySchema = new mongoose.Schema({
   description: { type: String },
   image: { type: String },
   parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+  // Phân biệt danh mục điện thoại vs phụ kiện — dùng để lọc BrandPage (chỉ điện thoại)
+  // tách khỏi AccessoriesPage (chỉ phụ kiện) dù cùng brandId (vd Apple bán cả 2 loại).
+  type: { type: String, enum: ['phone', 'accessory'], default: 'phone' },
   isActive: { type: Boolean, default: true },
   sortOrder: { type: Number, default: 0 },
 }, { timestamps: true });

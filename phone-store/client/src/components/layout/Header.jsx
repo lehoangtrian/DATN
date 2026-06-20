@@ -363,12 +363,12 @@ export default function Header() {
                 {brand}
               </Link>
             ))}
+            <Link to="/accessories" className="px-3.5 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800 rounded-full transition-colors font-medium">
+              Phụ kiện
+            </Link>
             <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700 mx-1" />
             <Link to="/products" className="px-3.5 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800 rounded-full transition-colors font-medium">
               Tất cả sản phẩm
-            </Link>
-            <Link to="/accessories" className="px-3.5 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800 rounded-full transition-colors font-medium">
-              Phụ kiện
             </Link>
             <Link to="/compare" className="px-3.5 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800 rounded-full transition-colors font-medium">
               So sánh

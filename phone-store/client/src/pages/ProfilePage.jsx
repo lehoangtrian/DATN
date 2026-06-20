@@ -2,16 +2,21 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getProfile, updateProfile, changePassword, addAddress, updateAddress, deleteAddress, uploadAvatar } from '../api/profile';
 import { getWalletBalance, getWalletTransactions, requestBankTopup, requestWithdrawal } from '../api/wallet';
+import { redeemPointsToCoupon } from '../api/loyalty';
 import { formatPrice } from '../utils/formatPrice';
-import { User, Lock, MapPin, Plus, Trash2, CheckCircle, Camera, Wallet, TrendingUp, TrendingDown, ArrowUpCircle, ArrowDownCircle, Copy, X, Award, Pencil } from 'lucide-react';
+import { User, Lock, MapPin, Plus, Trash2, CheckCircle, Camera, Wallet, TrendingUp, TrendingDown, ArrowUpCircle, ArrowDownCircle, Copy, X, Award, Pencil, Gem } from 'lucide-react';
 import Breadcrumb from '../components/ui/Breadcrumb';
 
+// multiplier phải khớp TIER_POINT_MULTIPLIER ở server/src/controllers/admin.controller.js
+// (chỉ dùng để hiển thị — số điểm thật được server tính khi đơn giao thành công)
 const TIERS = [
-  { id: 'bronze',   label: 'Bronze',   min: 0,          max: 5000000,   cls: 'bg-orange-100 text-orange-700', bar: 'bg-orange-400' },
-  { id: 'silver',   label: 'Silver',   min: 5000000,    max: 20000000,  cls: 'bg-gray-100 text-gray-600',    bar: 'bg-gray-400' },
-  { id: 'gold',     label: 'Gold',     min: 20000000,   max: 50000000,  cls: 'bg-yellow-100 text-yellow-700',bar: 'bg-yellow-400' },
-  { id: 'platinum', label: 'Platinum', min: 50000000,   max: null,      cls: 'bg-blue-100 text-blue-700',    bar: 'bg-blue-400' },
+  { id: 'bronze',   label: 'Bronze',   min: 0,          max: 5000000,   cls: 'bg-orange-100 text-orange-700', bar: 'bg-orange-400', multiplier: 1 },
+  { id: 'silver',   label: 'Silver',   min: 5000000,    max: 20000000,  cls: 'bg-gray-100 text-gray-600',    bar: 'bg-gray-400',   multiplier: 1.5 },
+  { id: 'gold',     label: 'Gold',     min: 20000000,   max: 50000000,  cls: 'bg-yellow-100 text-yellow-700',bar: 'bg-yellow-400', multiplier: 2 },
+  { id: 'platinum', label: 'Platinum', min: 50000000,   max: null,      cls: 'bg-blue-100 text-blue-700',    bar: 'bg-blue-400',   multiplier: 3 },
 ];
+
+const MIN_REDEEM_POINTS = 50; // khớp MIN_REDEEM_POINTS ở server/src/controllers/loyalty.controller.js
 
 const TABS = [
   { id: 'info',      label: 'Thông tin',    icon: User },
@@ -26,6 +31,13 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState({ type: '', text: '' });
+
+  // Đổi điểm sang mã giảm giá
+  const [showRedeemModal, setShowRedeemModal] = useState(false);
+  const [redeemPoints, setRedeemPoints] = useState(MIN_REDEEM_POINTS);
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemResult, setRedeemResult] = useState(null);
+  const [redeemError, setRedeemError] = useState('');
 
   // Avatar
   const [avatarPreview, setAvatarPreview] = useState(null);
@@ -215,6 +227,27 @@ export default function ProfilePage() {
     } catch (err) { notify('error', 'Có lỗi xảy ra'); }
   };
 
+  const handleRedeemPoints = async () => {
+    setRedeeming(true);
+    setRedeemError('');
+    try {
+      const res = await redeemPointsToCoupon(redeemPoints);
+      setRedeemResult(res.data.data);
+      setProfile((p) => ({ ...p, loyaltyPoints: res.data.data.remainingPoints }));
+    } catch (err) {
+      setRedeemError(err.response?.data?.message || 'Đổi điểm thất bại, vui lòng thử lại');
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  const closeRedeemModal = () => {
+    setShowRedeemModal(false);
+    setRedeemResult(null);
+    setRedeemError('');
+    setRedeemPoints(MIN_REDEEM_POINTS);
+  };
+
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-400';
 
   return (
@@ -329,7 +362,14 @@ export default function ProfilePage() {
                   <div className="bg-gray-50 rounded-xl p-3">
                     <p className="text-xs text-gray-500 mb-0.5">Điểm tích lũy</p>
                     <p className="text-lg font-bold text-gray-800">{points.toLocaleString('vi-VN')}</p>
-                    <p className="text-xs text-gray-400">≈ {formatPrice(points * 1000)}</p>
+                    <p className="text-xs text-gray-400 mb-1.5">≈ {formatPrice(points * 1000)}</p>
+                    <button
+                      onClick={() => setShowRedeemModal(true)}
+                      disabled={points < MIN_REDEEM_POINTS}
+                      className="text-xs text-blue-600 font-medium underline disabled:text-gray-300 disabled:no-underline disabled:cursor-not-allowed"
+                    >
+                      Đổi sang mã giảm giá
+                    </button>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-3">
                     <p className="text-xs text-gray-500 mb-0.5">Tổng chi tiêu</p>
@@ -659,6 +699,58 @@ export default function ProfilePage() {
               </div>
             </form>
           )}
+        </div>
+      )}
+
+      {/* ── Modal Đổi điểm sang mã giảm giá ── */}
+      {showRedeemModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={closeRedeemModal}>
+          <div className="bg-white rounded-2xl w-full max-w-sm my-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2"><Gem size={18} className="text-blue-600" /> Đổi điểm sang mã giảm giá</h3>
+              <button onClick={closeRedeemModal} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+
+            <div className="p-5">
+              {!redeemResult ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-500">
+                    Đang có <strong>{(profile?.loyaltyPoints || 0).toLocaleString('vi-VN')}</strong> điểm.
+                    Tỉ lệ đổi: 1 điểm = 1.000đ. Tối thiểu {MIN_REDEEM_POINTS} điểm/lần, mã có hiệu lực 30 ngày.
+                  </p>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Số điểm muốn đổi *</label>
+                    <input type="number" min={MIN_REDEEM_POINTS} max={profile?.loyaltyPoints || 0} step={1}
+                      value={redeemPoints}
+                      onChange={(e) => setRedeemPoints(Number(e.target.value) || 0)}
+                      className={inputCls} />
+                    {redeemPoints >= MIN_REDEEM_POINTS && (
+                      <p className="text-xs text-green-600 mt-1">= mã giảm {formatPrice(redeemPoints * 1000)}</p>
+                    )}
+                  </div>
+                  {redeemError && <p className="text-sm text-red-500">{redeemError}</p>}
+                  <button onClick={handleRedeemPoints}
+                    disabled={redeeming || redeemPoints < MIN_REDEEM_POINTS || redeemPoints > (profile?.loyaltyPoints || 0)}
+                    className="w-full btn-primary py-2.5 rounded-xl font-semibold disabled:opacity-60">
+                    {redeeming ? 'Đang đổi...' : 'Đổi ngay'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4 text-center">
+                  <CheckCircle size={40} className="text-green-500 mx-auto" />
+                  <p className="text-sm text-gray-600">Đổi điểm thành công! Mã giảm giá của bạn:</p>
+                  <div className="flex items-center justify-center gap-2 bg-gray-50 rounded-xl py-3 px-4">
+                    <span className="font-mono font-bold text-lg text-blue-600">{redeemResult.code}</span>
+                    <button onClick={() => copyToClipboard(redeemResult.code, 'redeemCode')} className="text-gray-400 hover:text-blue-600">
+                      {copiedField === 'redeemCode' ? <CheckCircle size={16} className="text-green-500" /> : <Copy size={16} />}
+                    </button>
+                  </div>
+                  <p className="text-sm text-gray-500">Giảm {formatPrice(redeemResult.value)} · Còn lại {(redeemResult.remainingPoints || 0).toLocaleString('vi-VN')} điểm</p>
+                  <button onClick={closeRedeemModal} className="w-full btn-outline py-2 rounded-xl text-sm">Đóng</button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

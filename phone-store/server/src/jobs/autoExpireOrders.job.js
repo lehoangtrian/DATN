@@ -115,6 +115,11 @@ const startAutoExpireOrdersJob = () => {
               });
             }
           }
+
+          // Hoàn lại điểm tích lũy đã dùng giảm giá cho đơn hết hạn tự động
+          if (order.pointsUsed > 0) {
+            await User.findByIdAndUpdate(order.userId, { $inc: { loyaltyPoints: order.pointsUsed } });
+          }
         } catch (orderErr) {
           logger.error(`[AutoExpire] Lỗi khi xử lý đơn ${order.orderCode}: ${orderErr.message}`);
         }

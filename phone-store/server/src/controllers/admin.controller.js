@@ -376,6 +376,10 @@ const getOrders = async (req, res, next) => {
 };
 
 const TIER_THRESHOLDS = { bronze: 0, silver: 5000000, gold: 20000000, platinum: 50000000 };
+// Hệ số nhân điểm tích lũy theo hạng — khớp đúng text đã hiển thị sẵn ở ProfilePage
+// ("Tích 1/1.5/2/3 điểm mỗi 1.000đ" theo hạng) — trước đây chỉ là text tĩnh, chưa có
+// logic thật đứng sau. Áp dụng lúc đơn được giao (xem updateOrderStatus).
+const TIER_POINT_MULTIPLIER = { bronze: 1, silver: 1.5, gold: 2, platinum: 3 };
 const calcTier = (totalSpent) => {
   if (totalSpent >= TIER_THRESHOLDS.platinum) return 'platinum';
   if (totalSpent >= TIER_THRESHOLDS.gold) return 'gold';
@@ -462,13 +466,23 @@ const updateOrderStatus = async (req, res, next) => {
           await Order.findByIdAndUpdate(order._id, { paymentStatus: 'refunded' });
         }
       }
+      // Hoàn lại điểm tích lũy đã dùng để giảm giá đơn này — đơn không thành thì điểm
+      // đã dùng phải trả lại, không thì user mất điểm vô lý cho đơn không mua được.
+      if (order.pointsUsed > 0) {
+        await User.findByIdAndUpdate(order.userId, { $inc: { loyaltyPoints: order.pointsUsed } });
+      }
     }
 
     const updated = await Order.findById(req.params.id).lean();
 
     // Tích điểm và cập nhật tier khi delivered (chỉ khi trạng thái cũ CHƯA phải delivered)
     if (status === 'delivered' && order.status !== 'delivered' && order.userId) {
-      const pointsEarned = Math.floor(order.totalPrice / 1000);
+      // Hệ số nhân theo hạng HIỆN TẠI của user (trước khi đơn này cộng thêm totalSpent) —
+      // dùng hạng đang có để thưởng điểm, không dùng hạng mới (nếu đơn này vừa đủ lên hạng).
+      const userBefore = await User.findById(order.userId).select('memberTier').lean();
+      const multiplier = TIER_POINT_MULTIPLIER[userBefore?.memberTier || 'bronze'] ?? 1;
+      const pointsEarned = Math.floor((order.totalPrice / 1000) * multiplier);
+      await Order.findByIdAndUpdate(order._id, { pointsEarned });
       const updatedUser = await User.findByIdAndUpdate(
         order.userId,
         { $inc: { loyaltyPoints: pointsEarned, totalSpent: order.totalPrice } },
@@ -697,8 +711,9 @@ const updateReturnRequest = async (req, res, next) => {
     const returnReq = await ReturnRequest.findById(req.params.id);
     if (!returnReq) return error(res, 'Không tìm thấy yêu cầu trả hàng', 404);
 
+    // Fetch 1 lần, dùng lại cho cả việc cap refundAmount và tính trừ điểm theo tỉ lệ ở dưới
+    const orderForCap = await Order.findById(returnReq.orderId).lean();
     if (refundAmount !== undefined) {
-      const orderForCap = await Order.findById(returnReq.orderId).lean();
       if (!orderForCap) return error(res, 'Không tìm thấy đơn hàng liên quan', 404);
       if (Number(refundAmount) > orderForCap.totalPrice) {
         return error(res, `Số tiền hoàn tối đa là ${orderForCap.totalPrice.toLocaleString('vi-VN')}đ`, 400);
@@ -740,6 +755,29 @@ const updateReturnRequest = async (req, res, next) => {
         { orderId: returnReq.orderId },
         { refundStatus: 'completed', refundAmount: actualAmount, refundMethod: 'wallet', refundedAt: new Date(), refundNote: 'Hoàn vào ví điện tử' }
       );
+
+      // Trừ lại điểm tích lũy + totalSpent tương ứng số tiền hoàn — tránh lỗ hổng
+      // "mua → nhận hàng (được cộng điểm, có thể đã nhân hệ số theo hạng) → trả hàng hoàn
+      // 100% tiền → vẫn giữ điểm/tier". Dùng đúng pointsEarned đã snapshot lúc giao hàng,
+      // trừ theo TỈ LỆ số tiền hoàn / tổng đơn — không tính lại từ actualAmount/1000 vì
+      // sẽ sai nếu lúc giao đã áp hệ số nhân (vd hạng Gold x1.5) khác với mặc định x1.
+      const orderPointsEarned = orderForCap?.pointsEarned || 0;
+      const orderTotal = orderForCap?.totalPrice || 0;
+      const pointsToDeduct = orderTotal > 0
+        ? Math.floor(orderPointsEarned * (actualAmount / orderTotal))
+        : 0;
+      if (pointsToDeduct > 0) {
+        const userBeforeDeduct = await User.findById(returnReq.userId).select('totalSpent loyaltyPoints');
+        if (userBeforeDeduct) {
+          const newTotalSpent = Math.max(0, (userBeforeDeduct.totalSpent || 0) - actualAmount);
+          const newPoints = Math.max(0, (userBeforeDeduct.loyaltyPoints || 0) - pointsToDeduct);
+          await User.findByIdAndUpdate(returnReq.userId, {
+            loyaltyPoints: newPoints,
+            totalSpent: newTotalSpent,
+            memberTier: calcTier(newTotalSpent),
+          });
+        }
+      }
 
       await Order.findByIdAndUpdate(returnReq.orderId, { status: 'returned', paymentStatus: 'refunded' });
 

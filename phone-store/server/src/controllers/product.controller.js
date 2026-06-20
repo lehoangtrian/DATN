@@ -25,23 +25,42 @@ const populateCheapestVariants = async (products) => {
 // GET /api/products
 const listProducts = async (req, res, next) => {
   try {
-    const { page = 1, limit = 20, brand, category, categories, minPrice, maxPrice, status, sort = 'newest', q } = req.query;
+    const { page = 1, limit = 20, brand, category, categories, productType, ram, minBattery, maxBattery, minPrice, maxPrice, status, sort = 'newest', q } = req.query;
 
     const filter = { isActive: true, status: status || 'selling' };
     if (q) filter.name = { $regex: escapeRegex(q), $options: 'i' };
 
     const categorySlugs = categories ? categories.split(',').map((s) => s.trim()).filter(Boolean) : null;
 
-    const [brandDoc, catDoc, catDocs] = await Promise.all([
+    const [brandDoc, catDoc, catDocs, typeDocs] = await Promise.all([
       brand ? Brand.findOne({ slug: brand }, '_id').lean() : null,
       category ? Category.findOne({ slug: category }, '_id').lean() : null,
       categorySlugs?.length ? Category.find({ slug: { $in: categorySlugs } }, '_id').lean() : null,
+      productType ? Category.find({ type: productType }, '_id').lean() : null,
     ]);
     if (brand && brandDoc) filter.brandId = brandDoc._id;
     if (category && catDoc) filter.categoryId = catDoc._id;
     if (categorySlugs?.length && catDocs?.length) {
       filter.categoryId = { $in: catDocs.map((c) => c._id) };
     }
+    // productType lọc thêm theo loại danh mục (phone/accessory) — dùng để tách
+    // BrandPage (chỉ điện thoại của hãng) khỏi phụ kiện cùng hãng (vd Apple).
+    // Kết hợp AND với category/categories ở trên nếu cả 2 cùng được truyền.
+    if (productType && typeDocs?.length) {
+      const typeIds = new Set(typeDocs.map((c) => c._id.toString()));
+      if (filter.categoryId) {
+        const existing = filter.categoryId.$in || [filter.categoryId];
+        filter.categoryId = { $in: existing.filter((id) => typeIds.has(id.toString())) };
+      } else {
+        filter.categoryId = { $in: [...typeIds] };
+      }
+    }
+    if (ram) filter['specs.ram'] = ram;
+
+    // Các điều kiện lọc theo _id (giá, pin...) cần GỘP (AND) với nhau nếu có nhiều hơn 1,
+    // không phải cái sau ghi đè cái trước — nên thu thập từng bộ id rồi giao (intersect).
+    const idConstraints = [];
+
     if (minPrice || maxPrice) {
       // Lọc theo giá hiệu dụng = salePrice (nếu có) hoặc price
       const min = minPrice ? Number(minPrice) : null;
@@ -53,7 +72,34 @@ const listProducts = async (req, res, next) => {
         isActive: true,
         $expr: { $and: exprConditions },
       }).distinct('productId');
-      filter._id = { $in: variantIds };
+      idConstraints.push(variantIds);
+    }
+
+    if (minBattery || maxBattery) {
+      // specs.battery là chuỗi tự do (vd "5000 mAh") — không thể $gte/$lte trực tiếp,
+      // nên lấy danh sách rồi parse số ở JS (catalog nhỏ, đủ nhanh; tránh aggregation
+      // regex/convert phức tạp không cần thiết cho quy mô dữ liệu hiện tại).
+      const min = minBattery ? Number(minBattery) : null;
+      const max = maxBattery ? Number(maxBattery) : null;
+      const candidates = await Product.find(
+        { isActive: true, 'specs.battery': { $exists: true, $ne: null } },
+        { specs: 1 }
+      ).lean();
+      const batteryIds = candidates.filter((p) => {
+        const m = /\d+/.exec(p.specs?.battery || '');
+        if (!m) return false;
+        const val = parseInt(m[0], 10);
+        return (min === null || val >= min) && (max === null || val <= max);
+      }).map((p) => p._id);
+      idConstraints.push(batteryIds);
+    }
+
+    if (idConstraints.length === 1) {
+      filter._id = { $in: idConstraints[0] };
+    } else if (idConstraints.length > 1) {
+      const sets = idConstraints.map((arr) => new Set(arr.map(String)));
+      const intersection = [...sets[0]].filter((id) => sets.every((s) => s.has(id)));
+      filter._id = { $in: intersection };
     }
 
     const [total, products] = await Promise.all([
@@ -99,15 +145,21 @@ const getFeatured = async (req, res, next) => {
 // GET /api/products/search?q=
 const searchProducts = async (req, res, next) => {
   try {
-    const { q } = req.query;
+    const { q, productType } = req.query;
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
     if (!q || !q.trim()) return error(res, 'Từ khóa tìm kiếm là bắt buộc', 400);
 
-    const products = await Product.find({
+    const filter = {
       isActive: true,
       status: 'selling',
       name: { $regex: escapeRegex(q.trim()), $options: 'i' },
-    })
+    };
+    if (productType) {
+      const typeDocs = await Category.find({ type: productType }, '_id').lean();
+      filter.categoryId = { $in: typeDocs.map((c) => c._id) };
+    }
+
+    const products = await Product.find(filter)
       .populate('brandId', 'name slug')
       .limit(limit)
       .lean();
